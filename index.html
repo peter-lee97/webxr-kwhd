@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forest Ocelot VR Experience</title>
+    <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+    <div id="info">
+        <h1>Forest Ocelot VR Experience</h1>
+        <p id="spawn-instruction">Click floor to spawn | Click cat to interact</p>
+        <p id="camera-instruction">Drag to rotate view</p>
+    </div>
+    <div id="dashboard">
+        <div class="dashboard-item">
+            <span class="dashboard-label">Cats:</span>
+            <span id="cat-count" class="dashboard-value">0</span>
+        </div>
+        <div class="dashboard-item">
+            <span class="dashboard-label">Actions:</span>
+            <span id="action-summary" class="dashboard-value dashboard-wide">none</span>
+        </div>
+        <div class="dashboard-item">
+            <span class="dashboard-label">Last interaction:</span>
+            <span id="interaction-status" class="dashboard-value dashboard-wide">none</span>
+        </div>
+        <div class="dashboard-item">
+            <span class="dashboard-label">Track:</span>
+            <span id="audio-track" class="dashboard-value dashboard-wide">none</span>
+        </div>
+        <div class="dashboard-item">
+            <span class="dashboard-label">Audio:</span>
+            <span id="audio-playback" class="dashboard-value dashboard-wide">Ready</span>
+        </div>
+    </div>
+    <div id="audio-controls">
+        <button id="audio-toggle" type="button" aria-label="Mute audio" data-muted="false">
+            <svg class="icon icon-unmuted" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 9v6h4l5 4V5L7 9H3zm13.5 3c0-1.8-1-3.3-2.5-4.1v8.2c1.5-.8 2.5-2.3 2.5-4.1zM14 3.2v2.1c2.9 1 5 3.8 5 6.7s-2.1 5.7-5 6.7v2.1c4.1-1.1 7-4.7 7-8.8s-2.9-7.7-7-8.8z"></path>
+            </svg>
+            <svg class="icon icon-muted" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M16.5 12c0-1.8-1-3.3-2.5-4.1v2.2l2.2 2.2c.2-.1.3-.2.3-.3zM3 9v6h4l5 4V14.8l-5-5.1V9H3zm16.7 12L2 3.3 3.3 2 21 19.7 19.7 21z"></path>
+            </svg>
+        </button>
+        <span id="audio-status">Ready</span>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    overflow: hidden;
+    background-color: #000;
+    font-family: Arial, sans-serif;
+}
+
+#info {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    padding: 15px;
+    border-radius: 5px;
+    z-index: 100;
+    max-width: 300px;
+}
+
+#info h1 {
+    font-size: 18px;
+    margin-bottom: 10px;
+    color: #FFD700;
+}
+
+#info p {
+    font-size: 14px;
+    margin: 5px 0;
+    color: #ccc;
+}
+
+canvas {
+    display: block;
+}
+
+#dashboard {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    padding: 15px;
+    border-radius: 5px;
+    z-index: 100;
+    border: 2px solid #FFD700;
+}
+
+.dashboard-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.dashboard-label {
+    font-size: 16px;
+    font-weight: bold;
+    color: #FFD700;
+}
+
+.dashboard-value {
+    font-size: 18px;
+    color: #fff;
+    min-width: 30px;
+    text-align: right;
+}
+
+.dashboard-wide {
+    min-width: 180px;
+    text-align: left;
+    font-size: 13px;
+    color: #dbe9ff;
+}
+
+#audio-controls {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.72);
+    border: 1px solid rgba(255, 215, 0, 0.45);
+    color: #fff;
+    z-index: 100;
+}
+
+#audio-controls button {
+    border: 1px solid #FFD700;
+    background: #1a1a1a;
+    color: #FFD700;
+    width: 38px;
+    height: 38px;
+    padding: 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#audio-controls .icon {
+    fill: #FFD700;
+    width: 22px;
+    height: 22px;
+    display: block;
+}
+
+#audio-controls #audio-toggle[data-muted="true"] .icon-unmuted {
+    display: none;
+}
+
+#audio-controls #audio-toggle[data-muted="false"] .icon-muted {
+    display: none;
+}
+
+#audio-status {
+    font-size: 12px;
+    color: #dbe9ff;
+}
