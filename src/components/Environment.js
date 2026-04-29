@@ -6,6 +6,7 @@ export class Environment {
         this.trees = [];
         this.rocks = [];
         this.logs = [];
+        this.bushes = [];
         this.waterBodies = [];
         this.grassInstances = [];
         
@@ -14,25 +15,35 @@ export class Environment {
         this.createTrees();
         this.createRocks();
         this.createLogs();
+        this.createBushes();
         this.createGrass();
     }
     
     createGround() {
         // Create a more realistic ground with texture-like appearance
-        const groundGeometry = new THREE.PlaneGeometry(100, 100, 20, 20);
+        const groundGeometry = new THREE.PlaneGeometry(100, 100, 32, 32);
         
         // Create a more complex material for the ground
         const groundMaterial = new THREE.MeshStandardMaterial({
             color: 0x3d5e3a,
             roughness: 0.9,
-            metalness: 0.1
+            metalness: 0.0,
+            flatShading: false
         });
         
-        // Add some variation to the ground surface
+        // Add more detailed variation to the ground surface
         const vertices = groundGeometry.attributes.position.array;
         for (let i = 0; i < vertices.length; i += 3) {
             // Add some random height variation to create a natural terrain look
-            vertices[i + 2] = (Math.random() - 0.5) * 0.5;
+            const x = vertices[i];
+            const z = vertices[i + 1];
+            
+            // Use multiple noise functions for more natural terrain
+            const noise1 = Math.sin(x * 0.1) * Math.cos(z * 0.1) * 0.3;
+            const noise2 = Math.sin(x * 0.3) * Math.cos(z * 0.3) * 0.1;
+            const noise3 = Math.sin(x * 0.05) * Math.cos(z * 0.05) * 0.5;
+            
+            vertices[i + 2] = noise1 + noise2 + noise3;
         }
         groundGeometry.attributes.position.needsUpdate = true;
         groundGeometry.computeVertexNormals();
@@ -40,6 +51,7 @@ export class Environment {
         this.ground = new THREE.Mesh(groundGeometry, groundMaterial);
         this.ground.rotation.x = -Math.PI / 2;
         this.ground.receiveShadow = true;
+        this.ground.castShadow = false;
         this.scene.add(this.ground);
     }
     
@@ -50,17 +62,17 @@ export class Environment {
         // Create water material with more realistic properties
         const waterMaterial = new THREE.MeshStandardMaterial({
             color: 0x1e88e5,
-            roughness: 0.05,
-            metalness: 0.95,
+            roughness: 0.0,
+            metalness: 0.9,
             transparent: true,
-            opacity: 0.7,
+            opacity: 0.8,
             emissive: 0x0d47a1,
-            emissiveIntensity: 0.2
+            emissiveIntensity: 0.3
         });
         
         const water = new THREE.Mesh(waterGeometry, waterMaterial);
         water.position.copy(position);
-        water.position.y = 0.01; // Slightly above ground to prevent z-fighting
+        water.position.y = 0.1; // Slightly above ground level
         water.rotation.x = -Math.PI / 2;
         
         // Add slight wave effect by adjusting vertices
@@ -86,6 +98,9 @@ export class Environment {
         // Create shoreline details around the water
         this.createShorelineDetails(position, size);
         
+        // Add aquatic plants in the water
+        this.createAquaticPlants(position, size);
+        
         return water;
     }
     
@@ -102,7 +117,7 @@ export class Environment {
         
         const shore = new THREE.Mesh(shoreGeometry, shoreMaterial);
         shore.position.copy(position);
-        shore.position.y = 0.005; // Slightly above ground
+        shore.position.y = 0.09; // Slightly above ground to match water level
         shore.rotation.x = -Math.PI / 2;
         shore.receiveShadow = true;
         
@@ -137,17 +152,91 @@ export class Environment {
         }
     }
     
+    createAquaticPlants(position, size) {
+        // Add lily pads on the water surface
+        const plantCount = Math.floor(size * 3);
+        for (let i = 0; i < plantCount; i++) {
+            // Random position within the water body
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * (size - 0.5);
+            
+            const x = position.x + Math.cos(angle) * distance;
+            const z = position.z + Math.sin(angle) * distance;
+            
+            // Create lily pad
+            const padGeometry = new THREE.CircleGeometry(0.3 + Math.random() * 0.2, 16);
+            const padMaterial = new THREE.MeshStandardMaterial({
+                color: 0x4caf50,
+                roughness: 0.9,
+                metalness: 0.0
+            });
+            
+            const lilyPad = new THREE.Mesh(padGeometry, padMaterial);
+            lilyPad.position.set(x, 0.11, z);
+            lilyPad.rotation.x = -Math.PI / 2;
+            lilyPad.receiveShadow = true;
+            
+            this.scene.add(lilyPad);
+            
+            // Occasionally add a flower to the lily pad
+            if (Math.random() > 0.7) {
+                const flowerGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+                const flowerMaterial = new THREE.MeshStandardMaterial({
+                    color: 0xffeb3b,
+                    emissive: 0xff9800,
+                    emissiveIntensity: 0.2
+                });
+                
+                const flower = new THREE.Mesh(flowerGeometry, flowerMaterial);
+                flower.position.set(x, 0.14, z);
+                flower.castShadow = true;
+                flower.receiveShadow = true;
+                
+                this.scene.add(flower);
+            }
+        }
+        
+        // Add underwater plants
+        const underwaterPlantCount = Math.floor(size * 2);
+        for (let i = 0; i < underwaterPlantCount; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * (size - 0.3);
+            
+            const x = position.x + Math.cos(angle) * distance;
+            const z = position.z + Math.sin(angle) * distance;
+            
+            // Create simple underwater plant using a tapered cylinder
+            const plantHeight = 0.5 + Math.random() * 0.8;
+            const plantGeometry = new THREE.CylinderGeometry(0.02, 0.05, plantHeight, 6);
+            const plantMaterial = new THREE.MeshStandardMaterial({
+                color: 0x2e7d32,
+                roughness: 0.9,
+                metalness: 0.0
+            });
+            
+            const plant = new THREE.Mesh(plantGeometry, plantMaterial);
+            plant.position.set(x, -plantHeight / 2 + 0.1, z);
+            plant.castShadow = false;
+            plant.receiveShadow = true;
+            
+            this.scene.add(plant);
+        }
+    }
+    
     createWaterBodies() {
         // Create a small pond near the center
-        this.createWaterBody(new THREE.Vector3(0, 0, 10), 5);
+        this.createWaterBody(new THREE.Vector3(0, 0, 15), 5);
         
-        // Create a few smaller puddles around the area
-        for (let i = 0; i < 3; i++) {
-            const x = (Math.random() - 0.5) * 30;
-            const z = (Math.random() - 0.5) * 30;
-            const size = 1 + Math.random() * 2;
-            
-            this.createWaterBody(new THREE.Vector3(x, 0, z), size);
+        // Create a few smaller puddles around the area with proper spacing
+        const positions = [
+            new THREE.Vector3(-20, 0, -10),
+            new THREE.Vector3(20, 0, -15),
+            new THREE.Vector3(0, 0, -25)
+        ];
+        
+        for (let i = 0; i < positions.length; i++) {
+            const size = 1.5 + Math.random() * 1.5;
+            this.createWaterBody(positions[i], size);
         }
     }
     
@@ -403,6 +492,60 @@ export class Environment {
         }
     }
     
+    createBush(position) {
+        const bushGroup = new THREE.Group();
+        
+        // Create multiple spheres for a fuller bush look
+        const sphereCount = 3 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < sphereCount; i++) {
+            const size = 0.5 + Math.random() * 0.5;
+            const geometry = new THREE.SphereGeometry(size, 6, 6);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x2e7d32,
+                roughness: 0.9,
+                metalness: 0.0
+            });
+            
+            const sphere = new THREE.Mesh(geometry, material);
+            
+            // Position spheres to create a natural bush shape
+            if (i === 0) {
+                // Main sphere at the base
+                sphere.position.y = size;
+            } else {
+                // Additional spheres positioned around the main one
+                const angle = (i / (sphereCount - 1)) * Math.PI * 2;
+                const distance = 0.3 + Math.random() * 0.4;
+                sphere.position.x = Math.cos(angle) * distance;
+                sphere.position.z = Math.sin(angle) * distance;
+                sphere.position.y = size + (Math.random() - 0.5) * 0.3;
+            }
+            
+            sphere.castShadow = true;
+            sphere.receiveShadow = true;
+            bushGroup.add(sphere);
+        }
+        
+        bushGroup.position.copy(position);
+        this.scene.add(bushGroup);
+        this.bushes.push(bushGroup);
+        
+        return bushGroup;
+    }
+    
+    createBushes() {
+        const bushCount = 15;
+        const boundarySize = 45;
+        
+        for (let i = 0; i < bushCount; i++) {
+            const x = (Math.random() - 0.5) * boundarySize * 1.8;
+            const z = (Math.random() - 0.5) * boundarySize * 1.8;
+            const y = 0;
+            
+            this.createBush(new THREE.Vector3(x, y, z));
+        }
+    }
+    
     createGrass() {
         // Create grass using instanced meshes for performance
         const grassCount = 500;
@@ -445,26 +588,65 @@ export class Environment {
         
         this.scene.add(grassInstances);
         this.grassInstances.push(grassInstances);
+        
+        // Add some flowers among the grass
+        this.createFlowers();
+    }
+    
+    createFlowers() {
+        const flowerCount = 30;
+        const boundarySize = 45;
+        
+        for (let i = 0; i < flowerCount; i++) {
+            const x = (Math.random() - 0.5) * boundarySize * 1.8;
+            const z = (Math.random() - 0.5) * boundarySize * 1.8;
+            const y = 0.1;
+            
+            // Random flower color
+            const colors = [0xffeb3b, 0xe91e63, 0x9c27b0, 0xff9800, 0xf44336];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            
+            // Create flower stem
+            const stemHeight = 0.3 + Math.random() * 0.4;
+            const stemGeometry = new THREE.CylinderGeometry(0.01, 0.01, stemHeight, 6);
+            const stemMaterial = new THREE.MeshStandardMaterial({
+                color: 0x4caf50,
+                roughness: 0.9,
+                metalness: 0.0
+            });
+            
+            const stem = new THREE.Mesh(stemGeometry, stemMaterial);
+            stem.position.set(x, y + stemHeight / 2, z);
+            stem.castShadow = true;
+            stem.receiveShadow = true;
+            this.scene.add(stem);
+            
+            // Create flower head
+            const headSize = 0.1 + Math.random() * 0.1;
+            const headGeometry = new THREE.SphereGeometry(headSize, 8, 8);
+            const headMaterial = new THREE.MeshStandardMaterial({
+                color: color,
+                roughness: 0.8,
+                metalness: 0.2
+            });
+            
+            const head = new THREE.Mesh(headGeometry, headMaterial);
+            head.position.set(x, y + stemHeight, z);
+            head.castShadow = true;
+            head.receiveShadow = true;
+            this.scene.add(head);
+        }
     }
     
     update() {
         // Add animations or updates for environmental elements if needed
         // For example, wind effects on trees or grass
-        // Animate water bodies for ripple effects
         const time = Date.now() * 0.001;
         
-        // Animate water waves with more natural movement
-        this.waterBodies.forEach((waterObj, index) => {
-            const water = waterObj.mesh;
-            const waveSpeed = waterObj.waveSpeed;
-            const waveHeight = waterObj.waveHeight;
-            
-            // Combine multiple sine waves for more natural water movement
-            const wave1 = Math.sin(time * waveSpeed + index) * waveHeight;
-            const wave2 = Math.sin(time * waveSpeed * 1.7 + index * 1.3) * waveHeight * 0.7;
-            const wave3 = Math.cos(time * waveSpeed * 0.8 + index * 0.7) * waveHeight * 0.5;
-            
-            water.position.y = waterObj.initialY + 0.01 + wave1 + wave2 + wave3;
+        // Add gentle wind effect to bushes
+        this.bushes.forEach((bush, index) => {
+            const windStrength = Math.sin(time * 0.5 + index) * 0.02;
+            bush.rotation.z = windStrength;
         });
     }
 }
