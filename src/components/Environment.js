@@ -651,52 +651,35 @@ export class Environment {
         });
     }
 
-    // ─── Background walls ─────────────────────────────────────────────────────
-    // Four large textured planes placed on cardinal sides of the scene.
-    // Images are loaded from /assets/images/bg-{0..3}.jpg at runtime.
-    // Walls use fog:false so they always appear as a clear distant backdrop.
-    // Order: 0=North (−Z), 1=East (+X), 2=South (+Z), 3=West (−X)
+    // ─── Background panorama ──────────────────────────────────────────────────
+    // A single large cylinder with BackSide material wraps one panoramic image
+    // continuously around all four sides with no seams.
+    // Expected image: public/assets/images/bg-panorama.png  (wide/equirectangular)
+    // Falls back to sky-blue until the image is present.
     createBackgroundWalls() {
-        const loader = new THREE.TextureLoader();
-        const W = 140;          // wall width  (wider than scene so no gaps at corners)
-        const H = 65;           // wall height
-        const DIST = 58;        // distance from scene centre
-        const Y = 25;           // vertical centre of each wall
-        const FALLBACK = 0x87CEEB;  // sky-blue placeholder until images load
-
-        const sides = [
-            { file: 'bg-0.png', pos: [  0,    Y, -DIST], rotY:  0              },  // North
-            { file: 'bg-1.png', pos: [ DIST,  Y,  0   ], rotY: -Math.PI / 2   },  // East
-            { file: 'bg-2.png', pos: [  0,    Y,  DIST], rotY:  Math.PI       },  // South
-            { file: 'bg-3.png', pos: [-DIST,  Y,  0   ], rotY:  Math.PI / 2   },  // West
-        ];
-
-        sides.forEach(({ file, pos, rotY }) => {
-            const geo = new THREE.PlaneGeometry(W, H);
-            const mat = new THREE.MeshBasicMaterial({
-                color: FALLBACK,
-                fog: false,
-                side: THREE.FrontSide,
-                depthWrite: false   // render behind all scene objects
-            });
-
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.position.set(...pos);
-            mesh.rotation.y = rotY;
-            mesh.renderOrder = -1;
-            this.scene.add(mesh);
-
-            loader.load(
-                `/assets/images/${file}`,
-                (texture) => {
-                    texture.colorSpace = THREE.SRGBColorSpace;
-                    mat.map = texture;
-                    mat.color.set(0xffffff);
-                    mat.needsUpdate = true;
-                },
-                undefined,
-                () => { /* image not found — fallback colour stays */ }
-            );
+        const geo = new THREE.CylinderGeometry(62, 62, 65, 64, 1, true);
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0x87CEEB,
+            side: THREE.BackSide,   // render inner face so it's visible from inside
+            fog: false,
+            depthWrite: false
         });
+
+        const panorama = new THREE.Mesh(geo, mat);
+        panorama.position.y = 24;
+        panorama.renderOrder = -1;
+        this.scene.add(panorama);
+
+        new THREE.TextureLoader().load(
+            '/assets/images/bg-panorama.png',
+            (texture) => {
+                texture.colorSpace = THREE.SRGBColorSpace;
+                mat.map = texture;
+                mat.color.set(0xffffff);
+                mat.needsUpdate = true;
+            },
+            undefined,
+            () => { /* image missing — fallback colour stays */ }
+        );
     }
 }
