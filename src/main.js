@@ -3,11 +3,13 @@ import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
 import { XRHandModelFactory } from 'three/examples/jsm/webxr/XRHandModelFactory.js';
 import { createOcelot } from './components/VoxelOcelot.js';
+import { createButterfly } from './components/VoxelButterfly.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Environment } from './components/Environment.js';
 
 let scene, camera, renderer;
 let ocelots = [];
+let butterflies = [];
 let environment; // Add environment reference
 let floor;
 let cameraAngle = 0;
@@ -118,6 +120,13 @@ function init() {
         const x = (Math.random() - 0.5) * boundarySize;
         const z = (Math.random() - 0.5) * boundarySize;
         spawnOcelot(x, z);
+    }
+
+    // Seed the scene with ambient butterflies
+    for (let i = 0; i < 8; i++) {
+        const x = (Math.random() - 0.5) * boundarySize;
+        const z = (Math.random() - 0.5) * boundarySize;
+        spawnButterfly(x, z);
     }
 
     updateControlInstructions();
@@ -284,6 +293,16 @@ function registerOcelotMeshes(ocelot) {
             ocelotMeshToEntity.set(child, ocelot);
         }
     });
+}
+
+function spawnButterfly(x, z) {
+    const butterfly = createButterfly({
+        position: new THREE.Vector3(x, 3 + Math.random() * 4, z),
+        boundarySize
+    });
+    butterflies.push(butterfly);
+    scene.add(butterfly.group);
+    return butterfly;
 }
 
 function updateDashboard() {
@@ -454,6 +473,10 @@ function handleXRHandInteractions() {
 function renderFrame() {
     ocelots.forEach(ocelot => {
         ocelot.animate();
+    });
+
+    butterflies.forEach(butterfly => {
+        butterfly.animate();
     });
 
     // Update environment if it has an update method
