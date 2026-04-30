@@ -40,6 +40,12 @@ let audioState = {
     trackName: 'none'
 };
 
+// Wand state variables
+let wandActive = false;
+let wandInteractions = 0;
+let wandPosition = new THREE.Vector3();
+let wandMesh = null;
+
 function detectDevice() {
     const hasPointer = matchMedia('(pointer: fine)').matches;
     const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -107,6 +113,9 @@ function init() {
     document.addEventListener('click', onMouseClick);
     document.addEventListener('keydown', onKeyDown);
 
+    // Setup wand controls
+    setupWandControls();
+    
     audioManager = new AudioManager(state => {
         audioState = state;
     });
@@ -186,12 +195,43 @@ function setupXRInteraction() {
         grip.add(controllerModelFactory.createControllerModel(grip));
         scene.add(grip);
 
+        // Add wand to controller grip
+        const wandGroup = createWandMesh();
+        wandGroup.rotation.x = Math.PI / 2;
+        wandGroup.position.z = -0.1;
+        grip.add(wandGroup);
+        grip.userData.wand = wandGroup;
+        grip.userData.wandActive = false;
+
         const hand = renderer.xr.getHand(i);
         hand.userData.sourceId = `hand-${i + 1}`;
         hand.add(handModelFactory.createHandModel(hand, 'mesh'));
         scene.add(hand);
         xrHands.push(hand);
     }
+}
+
+function createWandMesh() {
+    // Create a simple wand with a rod and a feather
+    const wandGroup = new THREE.Group();
+    
+    // Rod (cylinder)
+    const rodGeometry = new THREE.CylinderGeometry(0.02, 0.02, 1.5, 8);
+    const rodMaterial = new THREE.MeshBasicMaterial({ color: 0x8B4513 }); // Brown
+    const rod = new THREE.Mesh(rodGeometry, rodMaterial);
+    rod.rotation.x = Math.PI / 2;
+    rod.position.x = 0.75;
+    wandGroup.add(rod);
+    
+    // Feather (cone)
+    const featherGeometry = new THREE.ConeGeometry(0.15, 0.5, 8);
+    const featherMaterial = new THREE.MeshBasicMaterial({ color: 0xFF69B4 }); // Pink
+    const feather = new THREE.Mesh(featherGeometry, featherMaterial);
+    feather.position.x = 1.5;
+    feather.rotation.z = Math.PI / 2;
+    wandGroup.add(feather);
+    
+    return wandGroup;
 }
 
 function setupControls() {
@@ -208,6 +248,101 @@ function setupControls() {
         document.addEventListener('touchmove', onTouchMove, { passive: false });
         document.addEventListener('touchend', onTouchEnd);
         console.log('Mobile controls enabled');
+    }
+}
+
+function setupWandControls() {
+    const wandToggle = document.getElementById('wand-toggle');
+    if (wandToggle) {
+        wandToggle.addEventListener('click', toggleWand);
+    }
+    
+    // Add keyboard shortcut for desktop testing
+    document.addEventListener('keydown', (event) => {
+        if (event.code === 'KeyW') {
+            toggleWand();
+        }
+    });
+}
+
+function toggleWand() {
+    wandActive = !wandActive;
+    const wandToggle = document.getElementById('wand-toggle');
+    const wandStatus = document.getElementById('wand-status');
+    
+    if (wandActive) {
+        wandToggle.textContent = 'Deactivate Wand';
+        wandToggle.classList.add('active');
+        wandStatus.textContent = 'Active';
+        createWand();
+    } else {
+        wandToggle.textContent = 'Activate Wand';
+        wandToggle.classList.remove('active');
+        wandStatus.textContent = 'Inactive';
+        removeWand();
+    }
+    
+    updateDashboard();
+}
+
+function createWand() {
+    if (wandMesh) return; // Wand already exists
+    
+    // Create a simple wand with a rod and a feather
+    const wandGroup = new THREE.Group();
+    
+    // Rod (cylinder)
+    const rodGeometry = new THREE.CylinderGeometry(0.02, 0.02, 1.5, 8);
+    const rodMaterial = new THREE.MeshBasicMaterial({ color: 0x8B4513 }); // Brown
+    const rod = new THREE.Mesh(rodGeometry, rodMaterial);
+    rod.rotation.x = Math.PI / 2;
+    rod.position.x = 0.75;
+    wandGroup.add(rod);
+    
+    // Feather (cone)
+    const featherGeometry = new THREE.ConeGeometry(0.15, 0.5, 8);
+    const featherMaterial = new THREE.MeshBasicMaterial({ color: 0xFF69B4 }); // Pink
+    const feather = new THREE.Mesh(featherGeometry, featherMaterial);
+    feather.position.x = 1.5;
+    feather.rotation.z = Math.PI / 2;
+    wandGroup.add(feather);
+    
+    wandMesh = wandGroup;
+    
+    // Add wand to scene for desktop mode (attached to camera)
+    if (deviceType === 'desktop') {
+        wandMesh.position.set(0, 0, -2); // In front of camera
+        camera.add(wandMesh);
+    }
+}
+
+function removeWand() {
+    if (wandMesh) {
+        if (deviceType === 'desktop') {
+            camera.remove(wandMesh);
+        }
+        wandMesh = null;
+    }
+}
+
+function updateWandPosition() {
+    if (!wandActive) return;
+    
+    if (deviceType === 'desktop' && wandMesh) {
+        // For desktop, wand position is relative to camera
+        wandPosition.setFromMatrixPosition(wandMesh.matrixWorld);
+    } else if (renderer.xr.isPresenting) {
+        // For VR, get wand position from active controller
+        for (let i = 0; i < xrControllers.length; i++) {
+            const grip = renderer.xr.getControllerGrip(i);
+            if (grip && grip.userData.wand) {
+                // Get the position of the wand tip (feather position)
+                const wandTipPosition = new THREE.Vector3(1.5, 0, 0);
+                wandTipPosition.applyMatrix4(grip.userData.wand.matrixWorld);
+                wandPosition.copy(wandTipPosition);
+                break;
+            }
+        }
     }
 }
 
@@ -312,6 +447,8 @@ function updateDashboard() {
     const interactionStatus = document.getElementById('interaction-status');
     const audioTrack = document.getElementById('audio-track');
     const audioPlayback = document.getElementById('audio-playback');
+    const wandStatus = document.getElementById('wand-status');
+    const wandInteractionsEl = document.getElementById('wand-interactions');
 
     if (catCount) {
         catCount.textContent = ocelots.length;
@@ -340,6 +477,14 @@ function updateDashboard() {
     if (audioPlayback) {
         const muteText = audioState.isMuted ? 'Muted' : 'Unmuted';
         audioPlayback.textContent = `${audioState.status} | ${muteText}`;
+    }
+    
+    if (wandStatus) {
+        wandStatus.textContent = wandActive ? 'Active' : 'Inactive';
+    }
+    
+    if (wandInteractionsEl) {
+        wandInteractionsEl.textContent = wandInteractions;
     }
 }
 
@@ -403,6 +548,8 @@ function onKeyDown(event) {
     } else if (event.code === 'ArrowDown') {
         cameraRadius = Math.min(30, cameraRadius + 1);
         updateCameraPosition();
+    } else if (event.code === 'KeyW') {
+        toggleWand();
     }
 }
 
@@ -474,6 +621,14 @@ function handleXRHandInteractions() {
 function renderFrame() {
     ocelots.forEach(ocelot => {
         ocelot.animate();
+        
+        // Handle wand interactions
+        if (wandActive) {
+            const response = ocelot.respondToWand(wandPosition);
+            if (response === 'playful') {
+                wandInteractions++;
+            }
+        }
     });
 
     butterflies.forEach(butterfly => {
@@ -486,6 +641,7 @@ function renderFrame() {
     }
 
     handleXRHandInteractions();
+    updateWandPosition();
     updateDashboard();
     renderer.render(scene, camera);
 }

@@ -54,6 +54,11 @@ canvas {
     display: flex;
     align-items: center;
     gap: 10px;
+    margin-bottom: 8px;
+}
+
+.dashboard-item:last-child {
+    margin-bottom: 0;
 }
 
 .dashboard-label {
@@ -74,6 +79,26 @@ canvas {
     text-align: left;
     font-size: 13px;
     color: #dbe9ff;
+}
+
+.dashboard-button {
+    background-color: #1a1a1a;
+    color: #FFD700;
+    border: 1px solid #FFD700;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.dashboard-button:hover {
+    background-color: rgba(255, 215, 0, 0.2);
+}
+
+.dashboard-button.active {
+    background-color: #FFD700;
+    color: #000;
 }
 
 #audio-controls {

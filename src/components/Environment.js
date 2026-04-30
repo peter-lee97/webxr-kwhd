@@ -17,6 +17,7 @@ export class Environment {
         this.createLogs();
         this.createBushes();
         this.createGrass();
+        this.createBackgroundWalls();
     }
     
     createGround() {
@@ -647,6 +648,55 @@ export class Environment {
         this.bushes.forEach((bush, index) => {
             const windStrength = Math.sin(time * 0.5 + index) * 0.02;
             bush.rotation.z = windStrength;
+        });
+    }
+
+    // ─── Background walls ─────────────────────────────────────────────────────
+    // Four large textured planes placed on cardinal sides of the scene.
+    // Images are loaded from /assets/images/bg-{0..3}.jpg at runtime.
+    // Walls use fog:false so they always appear as a clear distant backdrop.
+    // Order: 0=North (−Z), 1=East (+X), 2=South (+Z), 3=West (−X)
+    createBackgroundWalls() {
+        const loader = new THREE.TextureLoader();
+        const W = 140;          // wall width  (wider than scene so no gaps at corners)
+        const H = 65;           // wall height
+        const DIST = 58;        // distance from scene centre
+        const Y = 25;           // vertical centre of each wall
+        const FALLBACK = 0x87CEEB;  // sky-blue placeholder until images load
+
+        const sides = [
+            { file: 'bg-0.jpg', pos: [  0,    Y, -DIST], rotY:  0              },  // North
+            { file: 'bg-1.jpg', pos: [ DIST,  Y,  0   ], rotY: -Math.PI / 2   },  // East
+            { file: 'bg-2.jpg', pos: [  0,    Y,  DIST], rotY:  Math.PI       },  // South
+            { file: 'bg-3.jpg', pos: [-DIST,  Y,  0   ], rotY:  Math.PI / 2   },  // West
+        ];
+
+        sides.forEach(({ file, pos, rotY }) => {
+            const geo = new THREE.PlaneGeometry(W, H);
+            const mat = new THREE.MeshBasicMaterial({
+                color: FALLBACK,
+                fog: false,
+                side: THREE.FrontSide,
+                depthWrite: false   // render behind all scene objects
+            });
+
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(...pos);
+            mesh.rotation.y = rotY;
+            mesh.renderOrder = -1;
+            this.scene.add(mesh);
+
+            loader.load(
+                `/assets/images/${file}`,
+                (texture) => {
+                    texture.colorSpace = THREE.SRGBColorSpace;
+                    mat.map = texture;
+                    mat.color.set(0xffffff);
+                    mat.needsUpdate = true;
+                },
+                undefined,
+                () => { /* image not found — fallback colour stays */ }
+            );
         });
     }
 }

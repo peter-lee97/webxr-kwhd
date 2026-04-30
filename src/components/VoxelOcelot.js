@@ -48,6 +48,10 @@ export class VoxelOcelot {
         this.targetRotation = 0;
         this.jumpProgress = 0;
         this.interactionCooldown = 0;
+        
+        // Wand interaction properties
+        this.wandFollowTimer = 0;
+        this.wandInterestLevel = 0;
     }
     
     createBody() {
@@ -772,6 +776,47 @@ export class VoxelOcelot {
         this.interactionCooldown = 35;
 
         return { sound, action: this.currentAction };
+    }
+
+    respondToWand(wandPosition) {
+        if (!this.bodyParts.head) return;
+        
+        // Calculate distance to wand
+        const distance = this.group.position.distanceTo(wandPosition);
+        
+        // If wand is close enough, show interest
+        if (distance < 5) {
+            // Increase interest level
+            this.wandInterestLevel = Math.min(1, this.wandInterestLevel + 0.02);
+            
+            // Make the cat look at the wand
+            const direction = new THREE.Vector3().subVectors(wandPosition, this.group.position).normalize();
+            const targetRotation = Math.atan2(direction.x, direction.z);
+            
+            // Rotate head toward wand
+            const headDirection = new THREE.Vector3().subVectors(wandPosition, this.bodyParts.head.getWorldPosition(new THREE.Vector3())).normalize();
+            const headTargetRotationY = Math.atan2(headDirection.x, headDirection.z);
+            const headTargetRotationX = -Math.asin(headDirection.y);
+            
+            // Apply head rotation with smooth interpolation
+            this.bodyParts.head.rotation.y += (headTargetRotationY - this.bodyParts.head.rotation.y) * 0.1;
+            this.bodyParts.head.rotation.x += (headTargetRotationX - this.bodyParts.head.rotation.x) * 0.1;
+            
+            // If wand is very close, trigger special behavior
+            if (distance < 2) {
+                // Increase chance of playful behavior
+                if (Math.random() < 0.02) {
+                    this.currentAction = 'jump';
+                    this.actionTimer = 30;
+                    return 'playful';
+                }
+            }
+        } else {
+            // Decrease interest level when wand is far
+            this.wandInterestLevel = Math.max(0, this.wandInterestLevel - 0.01);
+        }
+        
+        return this.wandInterestLevel > 0.5 ? 'interested' : 'neutral';
     }
 
     getStatus() {
