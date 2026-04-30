@@ -112,21 +112,27 @@ export class VoxelOcelot {
         this.bodyParts.snout = snout;
         headGroup.add(snout);
 
-        // ── Ears ── (smaller, pointy square-pyramid via 4-segment ConeGeometry)
-        const earRadius = 0.17 * s * earS;
-        const earDimH = 0.62 * s * earH;
-        const earLocalY = headHt / 2 + earDimH / 2;
+        // ── Ears ── (cuboid ears instead of cone-shaped, oriented horizontally)
+        const earWidth = 0.45 * s * earS;  // Increased width for horizontal orientation
+        const earHeight = 0.24 * s * earH; // Decreased height for horizontal orientation
+        const earDepth = 0.18 * s * earS;  // Adjusted depth
+        const earLocalY = headHt / 2 + earHeight / 2;
         const earLocalZ = headD * 0.28;
 
-        const earGeo = new THREE.ConeGeometry(earRadius, earDimH, 4);
-        earGeo.rotateY(Math.PI / 4);
-        const earMat = new THREE.MeshBasicMaterial({ color: this.getEarColor() });
+        // 70% probability for both ears to be the same color
+        const sameEarColor = Math.random() < 0.7;
+        const leftEarColor = this.getEarColor();
+        const rightEarColor = sameEarColor ? leftEarColor : this.getEarColor();
 
-        // Inner ear: smaller pink cone sitting inside the outer cone
-        const innerR = earRadius * 0.52;
-        const innerH = earDimH * 0.70;
-        const innerGeo = new THREE.ConeGeometry(innerR, innerH, 4);
-        innerGeo.rotateY(Math.PI / 4);
+        const earGeo = new THREE.BoxGeometry(earWidth, earHeight, earDepth);
+        const leftEarMat = new THREE.MeshBasicMaterial({ color: leftEarColor });
+        const rightEarMat = new THREE.MeshBasicMaterial({ color: rightEarColor });
+
+        // Inner ear: smaller pink cuboid sitting inside the outer ear
+        const innerWidth = earWidth * 0.70;
+        const innerHeight = earHeight * 0.52;
+        const innerDepth = earDepth * 0.52;
+        const innerGeo = new THREE.BoxGeometry(innerWidth, innerHeight, innerDepth);
         const innerMat = new THREE.MeshBasicMaterial({
             color: 0xE8A0A8,
             polygonOffset: true,
@@ -134,7 +140,7 @@ export class VoxelOcelot {
             polygonOffsetUnits: -1
         });
 
-        const leftEar = new THREE.Mesh(earGeo, earMat.clone());
+        const leftEar = new THREE.Mesh(earGeo, leftEarMat);
         leftEar.position.set(0, earLocalY, earLocalZ);
         leftEar.castShadow = true;
         this.bodyParts.leftEar = leftEar;
@@ -144,7 +150,7 @@ export class VoxelOcelot {
         leftInner.position.set(0, earLocalY, earLocalZ);
         headGroup.add(leftInner);
 
-        const rightEar = new THREE.Mesh(earGeo, earMat.clone());
+        const rightEar = new THREE.Mesh(earGeo, rightEarMat);
         rightEar.position.set(0, earLocalY, -earLocalZ);
         rightEar.castShadow = true;
         this.bodyParts.rightEar = rightEar;

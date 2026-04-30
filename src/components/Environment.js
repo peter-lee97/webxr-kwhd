@@ -665,10 +665,10 @@ export class Environment {
         const FALLBACK = 0x87CEEB;  // sky-blue placeholder until images load
 
         const sides = [
-            { file: 'bg-0.jpg', pos: [  0,    Y, -DIST], rotY:  0              },  // North
-            { file: 'bg-1.jpg', pos: [ DIST,  Y,  0   ], rotY: -Math.PI / 2   },  // East
-            { file: 'bg-2.jpg', pos: [  0,    Y,  DIST], rotY:  Math.PI       },  // South
-            { file: 'bg-3.jpg', pos: [-DIST,  Y,  0   ], rotY:  Math.PI / 2   },  // West
+            { file: 'bg-0.png', pos: [  0,    Y, -DIST], rotY:  0              },  // North
+            { file: 'bg-1.png', pos: [ DIST,  Y,  0   ], rotY: -Math.PI / 2   },  // East
+            { file: 'bg-2.png', pos: [  0,    Y,  DIST], rotY:  Math.PI       },  // South
+            { file: 'bg-3.png', pos: [-DIST,  Y,  0   ], rotY:  Math.PI / 2   },  // West
         ];
 
         sides.forEach(({ file, pos, rotY }) => {
