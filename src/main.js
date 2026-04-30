@@ -123,7 +123,8 @@ function init() {
     }
 
     // Seed the scene with ambient butterflies
-    for (let i = 0; i < 8; i++) {
+    const butterflyCount = 10 + Math.floor(Math.random() * 6); // 10–15
+    for (let i = 0; i < butterflyCount; i++) {
         const x = (Math.random() - 0.5) * boundarySize;
         const z = (Math.random() - 0.5) * boundarySize;
         spawnButterfly(x, z);
