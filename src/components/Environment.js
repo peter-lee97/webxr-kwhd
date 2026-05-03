@@ -10,14 +10,63 @@ export class Environment {
         this.waterBodies = [];
         this.grassInstances = [];
         
-        this.createGround();
-        this.createWaterBodies();
-        this.createTrees();
-        this.createRocks();
-        this.createLogs();
-        this.createBushes();
-        this.createGrass();
-        this.createDepthBackground();
+        console.log('Creating environment components...');
+        try {
+            this.createGround();
+            console.log('Ground created');
+        } catch (error) {
+            console.error('Failed to create ground:', error);
+        }
+        
+        try {
+            this.createWaterBodies();
+            console.log('Water bodies created');
+        } catch (error) {
+            console.error('Failed to create water bodies:', error);
+        }
+        
+        try {
+            this.createTrees();
+            console.log('Trees created');
+        } catch (error) {
+            console.error('Failed to create trees:', error);
+        }
+        
+        try {
+            this.createRocks();
+            console.log('Rocks created');
+        } catch (error) {
+            console.error('Failed to create rocks:', error);
+        }
+        
+        try {
+            this.createLogs();
+            console.log('Logs created');
+        } catch (error) {
+            console.error('Failed to create logs:', error);
+        }
+        
+        try {
+            this.createBushes();
+            console.log('Bushes created');
+        } catch (error) {
+            console.error('Failed to create bushes:', error);
+        }
+        
+        try {
+            this.createGrass();
+            console.log('Grass created');
+        } catch (error) {
+            console.error('Failed to create grass:', error);
+        }
+        
+        try {
+            this.createDepthBackground();
+            console.log('Depth background created');
+        } catch (error) {
+            console.error('Failed to create depth background:', error);
+        }
+        console.log('Environment creation complete');
     }
     
     createGround() {
@@ -663,41 +712,36 @@ export class Environment {
         canvas.height = H;
         const ctx = canvas.getContext('2d');
 
-        // Horizon sits at 50 % of the image height
-        const HZ = H * 0.50;
+        // Horizon at 55% — more sky room, elements get larger canvas slice
+        const HZ = H * 0.55;
 
-        // ── Sky ──────────────────────────────────────────────────────────────
+        // ── Sky — clear daytime blue ──────────────────────────────────────────
         const sky = ctx.createLinearGradient(0, 0, 0, HZ);
-        sky.addColorStop(0,    '#1b3d72');   // deep blue zenith
-        sky.addColorStop(0.45, '#3d72b8');   // mid sky
-        sky.addColorStop(0.82, '#85bcd8');   // pale near-horizon blue
-        sky.addColorStop(1,    '#c8e4f0');   // washed-out horizon
+        sky.addColorStop(0,    '#1a4a8a');   // rich blue zenith
+        sky.addColorStop(0.40, '#3a80c8');   // mid sky
+        sky.addColorStop(0.75, '#7ab8e0');   // lighter near horizon
+        sky.addColorStop(1,    '#b8dff0');   // pale blue-white at horizon
         ctx.fillStyle = sky;
         ctx.fillRect(0, 0, W, HZ);
 
-        // ── Sun-glow haze (warm radial glow near the horizon centre) ─────────
-        const glow = ctx.createRadialGradient(W * 0.5, HZ, 0, W * 0.5, HZ, W * 0.38);
-        glow.addColorStop(0,   'rgba(255,215,140,0.28)');
-        glow.addColorStop(0.5, 'rgba(255,215,140,0.10)');
-        glow.addColorStop(1,   'rgba(255,215,140,0)');
-        ctx.fillStyle = glow;
+        // ── Subtle sun haze — soft, wide, low intensity ───────────────────────
+        const sunY = HZ * 0.82;
+        const sunGlow = ctx.createRadialGradient(W * 0.62, sunY, 0, W * 0.62, sunY, W * 0.28);
+        sunGlow.addColorStop(0,   'rgba(255,250,220,0.18)');
+        sunGlow.addColorStop(0.4, 'rgba(255,240,200,0.08)');
+        sunGlow.addColorStop(1,   'rgba(255,235,190,0)');
+        ctx.fillStyle = sunGlow;
         ctx.fillRect(0, 0, W, HZ);
 
         // ── Ground ───────────────────────────────────────────────────────────
         const ground = ctx.createLinearGradient(0, HZ, 0, H);
-        ground.addColorStop(0,   '#3a6b28');
-        ground.addColorStop(0.4, '#2d5520');
-        ground.addColorStop(1,   '#192f0e');
+        ground.addColorStop(0,   '#4a7a28');   // bright green near horizon
+        ground.addColorStop(0.35, '#3a6020');
+        ground.addColorStop(1,   '#1e3510');   // deep forest floor
         ctx.fillStyle = ground;
         ctx.fillRect(0, HZ, W, H - HZ);
 
         // ── Silhouette helper ─────────────────────────────────────────────────
-        // Draws a row of pointed conifer/pine silhouettes as a filled polygon.
-        //   yBase   - bottom edge of this layer (canvas y, positive = down)
-        //   maxH    - tallest tree height in pixels
-        //   spacing - approx px between tree centres
-        //   seed    - offsets the deterministic noise so each layer looks different
-        //   color   - CSS fill string
         const drawConiferLayer = (yBase, maxH, spacing, seed, color) => {
             ctx.fillStyle = color;
             ctx.beginPath();
@@ -706,15 +750,13 @@ export class Environment {
 
             let x = 0;
             while (x <= W + spacing) {
-                // Deterministic height variation via overlapping sine waves
                 const noise =
-                    Math.sin(x * 0.018 + seed)         * 0.35 +
-                    Math.sin(x * 0.007 + seed * 1.9)   * 0.45 +
-                    Math.sin(x * 0.042 + seed * 0.8)   * 0.20;
-                const h  = maxH * (0.50 + (noise * 0.5 + 0.5) * 0.50);
-                const hw = spacing * 0.55;   // half-width of this tree
+                    Math.sin(x * 0.018 + seed)       * 0.35 +
+                    Math.sin(x * 0.007 + seed * 1.9) * 0.45 +
+                    Math.sin(x * 0.042 + seed * 0.8) * 0.20;
+                const h  = maxH * (0.55 + (noise * 0.5 + 0.5) * 0.45);
+                const hw = spacing * 0.55;
 
-                // Conifer profile: narrow base flare → pointed tip via bezier
                 ctx.lineTo(x - hw * 0.18, yBase);
                 ctx.lineTo(x - hw * 0.12, yBase - h * 0.55);
                 ctx.bezierCurveTo(
@@ -732,7 +774,7 @@ export class Environment {
             ctx.fill();
         };
 
-        // ── Distant rolling hills (very hazy, almost sky colour) ─────────────
+        // ── Distant rolling hills ─────────────────────────────────────────────
         const hillPath = (yBase, amplitude, freqA, freqB, phaseA, phaseB) => {
             ctx.beginPath();
             ctx.moveTo(0, H);
@@ -747,48 +789,44 @@ export class Environment {
             ctx.closePath();
         };
 
-        // Very far mountains — nearly sky colour, barely visible
-        const mtnGrad1 = ctx.createLinearGradient(0, HZ - 30, 0, HZ + 5);
-        mtnGrad1.addColorStop(0, 'rgba(155,185,210,0.50)');
-        mtnGrad1.addColorStop(1, 'rgba(130,165,195,0.80)');
+        // Very far mountains — blue-grey silhouette
+        const mtnGrad1 = ctx.createLinearGradient(0, HZ - 65, 0, HZ + 8);
+        mtnGrad1.addColorStop(0, 'rgba(120,155,185,0.55)');
+        mtnGrad1.addColorStop(1, 'rgba(100,135,165,0.80)');
         ctx.fillStyle = mtnGrad1;
-        hillPath(HZ + 4, 26, 0.0040, 0.0090, 0.0, 1.2);
+        hillPath(HZ + 6, 65, 0.0040, 0.0090, 0.0, 1.2);
         ctx.fill();
 
-        // Mid-distance hills — slightly greener
-        const mtnGrad2 = ctx.createLinearGradient(0, HZ - 20, 0, HZ + 10);
-        mtnGrad2.addColorStop(0, 'rgba(100,140,115,0.72)');
-        mtnGrad2.addColorStop(1, 'rgba(78,118,85,0.92)');
+        // Mid-distance hills — muted green
+        const mtnGrad2 = ctx.createLinearGradient(0, HZ - 48, 0, HZ + 12);
+        mtnGrad2.addColorStop(0, 'rgba(70,105,55,0.85)');
+        mtnGrad2.addColorStop(1, 'rgba(50, 82,30,0.96)');
         ctx.fillStyle = mtnGrad2;
-        hillPath(HZ + 8, 20, 0.0062, 0.0130, 0.5, 2.3);
+        hillPath(HZ + 10, 48, 0.0062, 0.0130, 0.5, 2.3);
         ctx.fill();
 
-        // ── Forest silhouette layers: far → near (darker, taller, sharper) ───
-        // Each layer's base is progressively lower (closer to viewer)
-        drawConiferLayer(HZ + 14, 32, 20, 1.0, 'rgba(75,112,72,0.80)');   // far  – hazy
-        drawConiferLayer(HZ + 22, 44, 15, 2.6, 'rgba(50, 90,48,0.90)');   // mid
-        drawConiferLayer(HZ + 34, 58, 11, 4.3, 'rgba(28, 62,26,0.97)');   // near – crisp
+        // ── Forest silhouette layers: far → near (taller, crisper) ───────────
+        drawConiferLayer(HZ + 28,  90, 22, 1.0, 'rgba(90,110,55,0.82)');   // far  – warm hazy
+        drawConiferLayer(HZ + 48, 120, 17, 2.6, 'rgba(45, 80,30,0.93)');   // mid
+        drawConiferLayer(HZ + 75, 155, 12, 4.3, 'rgba(18, 48,15,0.98)');   // near – crisp dark
 
-        // ── Atmospheric horizon band ──────────────────────────────────────────
-        // Bright foggy strip at the horizon — the key cue that sells great distance
-        const haze = ctx.createLinearGradient(0, HZ - 22, 0, HZ + 22);
-        haze.addColorStop(0,    'rgba(195,225,242,0)');
-        haze.addColorStop(0.38, 'rgba(195,225,242,0.60)');
-        haze.addColorStop(0.62, 'rgba(195,225,242,0.60)');
-        haze.addColorStop(1,    'rgba(195,225,242,0)');
+        // ── Atmospheric horizon band — warm, subtle ───────────────────────────
+        const haze = ctx.createLinearGradient(0, HZ - 18, 0, HZ + 18);
+        haze.addColorStop(0,    'rgba(240,190,100,0)');
+        haze.addColorStop(0.40, 'rgba(240,190,100,0.28)');
+        haze.addColorStop(0.60, 'rgba(240,190,100,0.28)');
+        haze.addColorStop(1,    'rgba(240,190,100,0)');
         ctx.fillStyle = haze;
-        ctx.fillRect(0, HZ - 22, W, 44);
+        ctx.fillRect(0, HZ - 18, W, 36);
 
         // ── Apply as scene background ─────────────────────────────────────────
-        // scene.background renders as a flat fullscreen quad with no depth writes,
-        // completely free at runtime because it is drawn once and never redrawn.
         const tex = new THREE.CanvasTexture(canvas);
         tex.colorSpace = THREE.SRGBColorSpace;
         this.scene.background = tex;
 
-        // Match fog colour to horizon haze so 3D objects fade naturally into it
+        // Warm amber fog so 3D objects fade into the golden horizon
         if (this.scene.fog) {
-            this.scene.fog.color.set(0xc3e1f2);
+            this.scene.fog.color.set(0x8bbedd);
         }
     }
 }

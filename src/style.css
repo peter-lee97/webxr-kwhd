@@ -10,6 +10,161 @@ body {
     font-family: Arial, sans-serif;
 }
 
+/* ── Viewfinder overlay ─────────────────────────────────── */
+#viewfinder-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    pointer-events: none;
+    z-index: 90;
+    /* Lens barrel vignette: transparent center → dark edges */
+    background: radial-gradient(
+        ellipse 82% 82% at 50% 50%,
+        transparent 38%,
+        rgba(0, 0, 0, 0.25) 58%,
+        rgba(0, 0, 0, 0.65) 80%,
+        rgba(0, 0, 0, 0.92) 100%
+    );
+}
+
+/* Rule-of-thirds grid — occupies the "clear" lens area */
+.vf-grid {
+    position: absolute;
+    top: 9%;
+    left: 11%;
+    right: 11%;
+    bottom: 14%;  /* leave room for HUD bar */
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+}
+
+.vf-cell {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* Outer frame corner brackets */
+.vf-frame {
+    position: absolute;
+    top: 9%;
+    left: 11%;
+    right: 11%;
+    bottom: 14%;
+}
+
+.vf-fc {
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border-color: rgba(255, 215, 0, 0.85);
+    border-style: solid;
+    border-width: 0;
+}
+.vf-fc-tl { top: 0;    left: 0;    border-top-width: 2px;    border-left-width: 2px; }
+.vf-fc-tr { top: 0;    right: 0;   border-top-width: 2px;    border-right-width: 2px; }
+.vf-fc-bl { bottom: 0; left: 0;    border-bottom-width: 2px; border-left-width: 2px; }
+.vf-fc-br { bottom: 0; right: 0;   border-bottom-width: 2px; border-right-width: 2px; }
+
+/* Center focus reticle */
+.vf-focus {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -52%); /* nudge up slightly above HUD */
+    width: 72px;
+    height: 72px;
+}
+
+.vf-fr {
+    position: absolute;
+    width: 13px;
+    height: 13px;
+    border-color: #FFD700;
+    border-style: solid;
+    border-width: 0;
+}
+.vf-fr-tl { top: 0;    left: 0;    border-top-width: 1.5px; border-left-width: 1.5px; }
+.vf-fr-tr { top: 0;    right: 0;   border-top-width: 1.5px; border-right-width: 1.5px; }
+.vf-fr-bl { bottom: 0; left: 0;    border-bottom-width: 1.5px; border-left-width: 1.5px; }
+.vf-fr-br { bottom: 0; right: 0;   border-bottom-width: 1.5px; border-right-width: 1.5px; }
+
+/* Crosshair dot */
+.vf-fr-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 4px;
+    height: 4px;
+    background: rgba(255, 215, 0, 0.75);
+    border-radius: 50%;
+}
+
+/* HUD bar */
+.vf-hud {
+    position: absolute;
+    bottom: 5%;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: rgba(255, 215, 0, 0.9);
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.vf-hud-icon {
+    font-size: 8px;
+    color: #ff4444;
+    animation: vf-blink 1.2s step-start infinite;
+}
+
+.vf-hud-count {
+    font-size: 14px;
+    font-weight: bold;
+    min-width: 3ch;
+}
+
+.vf-hud-hint {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+}
+
+@keyframes vf-blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+}
+
+/* Hide HUD elements while viewfinder is active */
+body.viewfinder-active #info,
+body.viewfinder-active #dashboard,
+body.viewfinder-active #audio-controls {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+/* Restore HUD elements when viewfinder is off */
+#info, #dashboard, #audio-controls {
+    transition: opacity 0.2s ease;
+}
+
+/* Capture flash effect */
+#capture-flash {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.8);
+    display: none;
+    pointer-events: none;
+    z-index: 95;
+}
+
 #info {
     position: absolute;
     top: 10px;

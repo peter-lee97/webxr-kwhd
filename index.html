@@ -7,6 +7,40 @@
     <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
+    <!-- Viewfinder overlay: camera-lens style -->
+    <div id="viewfinder-overlay">
+        <!-- Rule-of-thirds grid -->
+        <div class="vf-grid">
+            <div class="vf-cell"></div><div class="vf-cell"></div><div class="vf-cell"></div>
+            <div class="vf-cell"></div><div class="vf-cell"></div><div class="vf-cell"></div>
+            <div class="vf-cell"></div><div class="vf-cell"></div><div class="vf-cell"></div>
+        </div>
+        <!-- Outer frame corners -->
+        <div class="vf-frame">
+            <span class="vf-fc vf-fc-tl"></span>
+            <span class="vf-fc vf-fc-tr"></span>
+            <span class="vf-fc vf-fc-bl"></span>
+            <span class="vf-fc vf-fc-br"></span>
+        </div>
+        <!-- Center focus reticle -->
+        <div class="vf-focus">
+            <span class="vf-fr vf-fr-tl"></span>
+            <span class="vf-fr vf-fr-tr"></span>
+            <span class="vf-fr vf-fr-bl"></span>
+            <span class="vf-fr vf-fr-br"></span>
+            <span class="vf-fr-dot"></span>
+        </div>
+        <!-- HUD bar -->
+        <div class="vf-hud">
+            <span class="vf-hud-icon">⬤</span>
+            <span class="vf-hud-count" id="vf-capture-count">000</span>
+            <span class="vf-hud-hint">SPACE · capture &nbsp;|&nbsp; C · exit</span>
+        </div>
+    </div>
+    
+    <!-- Capture flash effect -->
+    <div id="capture-flash"></div>
+    
     <div id="info">
         <h1>Forest Ocelot VR Experience</h1>
         <p id="spawn-instruction">Click floor to spawn | Click cat to interact</p>
@@ -26,23 +60,12 @@
             <span id="interaction-status" class="dashboard-value dashboard-wide">none</span>
         </div>
         <div class="dashboard-item">
-            <span class="dashboard-label">Wand:</span>
-            <span id="wand-status" class="dashboard-value">Inactive</span>
-        </div>
-        <div class="dashboard-item">
-            <span class="dashboard-label">Wand interactions:</span>
-            <span id="wand-interactions" class="dashboard-value">0</span>
-        </div>
-        <div class="dashboard-item">
             <span class="dashboard-label">Track:</span>
             <span id="audio-track" class="dashboard-value dashboard-wide">none</span>
         </div>
         <div class="dashboard-item">
             <span class="dashboard-label">Audio:</span>
             <span id="audio-playback" class="dashboard-value dashboard-wide">Ready</span>
-        </div>
-        <div class="dashboard-item">
-            <button id="wand-toggle" class="dashboard-button">Activate Wand</button>
         </div>
     </div>
     <div id="audio-controls">

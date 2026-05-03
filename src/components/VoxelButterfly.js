@@ -2,41 +2,46 @@ import * as THREE from 'three';
 
 export class VoxelButterfly {
     constructor(options = {}) {
-        this.size = options.size || 0.6;
-        this.position = options.position || new THREE.Vector3(0, 3, 0);
-        this.boundarySize = options.boundarySize || 45;
-        this.group = new THREE.Group();
+        try {
+            this.size = options.size || 0.6;
+            this.position = options.position || new THREE.Vector3(0, 3, 0);
+            this.boundarySize = options.boundarySize || 45;
+            this.group = new THREE.Group();
 
-        this.animationTime = Math.random() * Math.PI * 2;
-        this.flapPhase = Math.random() * Math.PI * 2;
+            this.animationTime = Math.random() * Math.PI * 2;
+            this.flapPhase = Math.random() * Math.PI * 2;
 
-        // Species: 0=Monarch  1=Blue Morpho  2=Swallowtail  3=Cabbage White  4=Red Admiral
-        this.speciesType = options.speciesType !== undefined
-            ? options.speciesType
-            : Math.floor(Math.random() * 5);
-        this.speciesProfile = VoxelButterfly.getSpeciesProfiles()[this.speciesType];
+            // Species: 0=Monarch  1=Blue Morpho  2=Swallowtail  3=Cabbage White  4=Red Admiral
+            this.speciesType = options.speciesType !== undefined
+                ? options.speciesType
+                : Math.floor(Math.random() * 5);
+            this.speciesProfile = VoxelButterfly.getSpeciesProfiles()[this.speciesType];
 
-        // Per-individual variation
-        this.wingSpan      = 0.85 + Math.random() * 0.45;
-        this.flapSpeed     = 4.0  + Math.random() * 4.5;
-        this.flapAmplitude = 0.60 + Math.random() * 0.30;
-        this.flightHeight  = 2.5  + Math.random() * 4.5;
-        this.flightRadius  = 5    + Math.random() * 14;
-        this.orbitCenter   = options.position
-            ? new THREE.Vector3(options.position.x, 0, options.position.z)
-            : new THREE.Vector3((Math.random() - 0.5) * 30, 0, (Math.random() - 0.5) * 30);
+            // Per-individual variation
+            this.wingSpan      = 0.85 + Math.random() * 0.45;
+            this.flapSpeed     = 4.0  + Math.random() * 4.5;
+            this.flapAmplitude = 0.60 + Math.random() * 0.30;
+            this.flightHeight  = 2.5  + Math.random() * 4.5;
+            this.flightRadius  = 5    + Math.random() * 14;
+            this.orbitCenter   = options.position
+                ? new THREE.Vector3(options.position.x, 0, options.position.z)
+                : new THREE.Vector3((Math.random() - 0.5) * 30, 0, (Math.random() - 0.5) * 30);
 
-        this.bodyParts = {};
-        this.createBody();
-        this.createWings();
-        this.createAntennae();
+            this.bodyParts = {};
+            this.createBody();
+            this.createWings();
+            this.createAntennae();
 
-        this.group.position.copy(this.position);
-        this.group.position.y = this.flightHeight;
+            this.group.position.copy(this.position);
+            this.group.position.y = this.flightHeight;
 
-        this.targetPosition = new THREE.Vector3();
-        this._toTarget = new THREE.Vector3();
-        this.pickNewTarget();
+            this.targetPosition = new THREE.Vector3();
+            this._toTarget = new THREE.Vector3();
+            this.pickNewTarget();
+        } catch (error) {
+            console.error('Failed to create VoxelButterfly:', error);
+            throw error;
+        }
     }
 
     // ─── Body ────────────────────────────────────────────────────────────────

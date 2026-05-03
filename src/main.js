@@ -7,7 +7,7 @@ import { createButterfly } from './components/VoxelButterfly.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Environment } from './components/Environment.js';
 
-let scene, camera, renderer;
+let scene, camera, renderer, cameraRig;
 let ocelots = [];
 let butterflies = [];
 let environment; // Add environment reference
@@ -16,6 +16,12 @@ let cameraAngle = 0;
 let cameraRadius = 15;
 let cameraHeight = 8;
 const boundarySize = 45;
+
+// VR locomotion constants
+const VR_MOVE_SPEED = 3;    // metres per second
+const VR_LOOK_SPEED = 1.5;  // radians per second
+const VR_DEAD_ZONE = 0.15;  // thumbstick dead zone
+let lastFrameTime = 0;
 let deviceType = 'desktop';
 let isDragging = false;
 let hasDragged = false;
@@ -40,18 +46,59 @@ let audioState = {
     trackName: 'none'
 };
 
-// Wand state variables
-let wandActive = false;
-let wandInteractions = 0;
-let wandPosition = new THREE.Vector3();
-let wandMesh = null;
+// Camera capture state variables
+let cameraViewfinderActive = false;
+let captureCounter = 0; // For incremental folder naming
+const viewfinderOverlay = document.getElementById('viewfinder-overlay');
+const captureFlash = document.getElementById('capture-flash');
+
+function toggleViewfinder() {
+    cameraViewfinderActive = !cameraViewfinderActive;
+    viewfinderOverlay.style.display = cameraViewfinderActive ? 'block' : 'none';
+    document.body.classList.toggle('viewfinder-active', cameraViewfinderActive);
+}
+
+async function captureScene() {
+    captureFlash.style.display = 'block';
+    audioManager.playShutter();
+
+    captureCounter++;
+    const name = `capture_${captureCounter.toString().padStart(3, '0')}`;
+
+    const countEl = document.getElementById('vf-capture-count');
+    if (countEl) countEl.textContent = captureCounter.toString().padStart(3, '0');
+
+    renderer.render(scene, camera);
+    const dataUrl = renderer.domElement.toDataURL('image/png');
+
+    try {
+        const res = await fetch('/save-capture', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, dataUrl })
+        });
+        if (!res.ok) throw new Error(`Server error ${res.status}`);
+        const { file } = await res.json();
+        console.log(`Capture saved: ${file}`);
+    } catch (err) {
+        console.warn('Could not save to server, falling back to download:', err);
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = `${name}.png`;
+        link.click();
+    }
+
+    setTimeout(() => {
+        captureFlash.style.display = 'none';
+    }, 150);
+}
 
 function detectDevice() {
     const hasPointer = matchMedia('(pointer: fine)').matches;
     const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    
+
     if (hasTouch || isMobile) {
         deviceType = 'mobile';
     } else if (hasPointer) {
@@ -59,32 +106,103 @@ function detectDevice() {
     } else {
         deviceType = 'mobile';
     }
-    
+
     console.log('Detected device type:', deviceType);
 }
 
 function init() {
+    console.log('Initializing application...');
     const container = document.body;
-    
-    detectDevice();
 
+    detectDevice();
+    console.log('Device type detected:', deviceType);
+
+    // Initialize scene first
     scene = new THREE.Scene();
+    if (!scene) {
+        console.error('Failed to create scene');
+        displayFatalError('Failed to initialize 3D scene');
+        return;
+    }
+    console.log('Scene created successfully');
+
     scene.background = new THREE.Color(0x87CEEB);
-    scene.fog = new THREE.Fog(0x6a8c6a, 20, 100); // Forest-green fog
+    scene.fog = new THREE.Fog(0x8bbedd, 20, 100); // Warm amber fog (overridden by Environment)
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(0, cameraHeight, cameraRadius);
     camera.lookAt(0, 0, 0);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.shadowMap.enabled = true;
-    renderer.xr.enabled = true;
-    container.appendChild(renderer.domElement);
-    document.body.appendChild(VRButton.createButton(renderer, {
-        optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
-    }));
+    // Camera rig: wraps camera so VR locomotion can move/rotate the player
+    cameraRig = new THREE.Group();
+    cameraRig.add(camera);
+    scene.add(cameraRig);
+
+    // Create renderer with error handling
+    try {
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.xr.enabled = true;
+
+        // Check if WebGL context is available
+        if (renderer.getContext() === null) {
+            throw new Error('WebGL context not available');
+        }
+
+        container.appendChild(renderer.domElement);
+        console.log('Renderer created successfully');
+    } catch (error) {
+        console.error('Failed to create WebGL renderer:', error);
+        // Create a fallback message
+        const errorMessage = document.createElement('div');
+        errorMessage.style.position = 'absolute';
+        errorMessage.style.top = '50%';
+        errorMessage.style.left = '50%';
+        errorMessage.style.transform = 'translate(-50%, -50%)';
+        errorMessage.style.color = 'white';
+        errorMessage.style.fontSize = '24px';
+        errorMessage.style.textAlign = 'center';
+        errorMessage.style.zIndex = '1000';
+        errorMessage.innerHTML = `
+            <p>WebGL is not supported or unavailable in your browser.</p>
+            <p>Please try updating your browser or using a different one.</p>
+            <p>Error: ${error.message}</p>
+        `;
+        document.body.appendChild(errorMessage);
+        return;
+    }
+
+    // Verify renderer was created successfully
+    if (!renderer) {
+        console.error('Renderer not available');
+        displayFatalError('Failed to create 3D renderer');
+        return;
+    }
+
+    // Add VR button with error handling
+    try {
+        document.body.appendChild(VRButton.createButton(renderer, {
+            optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+        }));
+    } catch (error) {
+        console.warn('Failed to create VR button:', error);
+        // Create a simple fallback button
+        const fallbackButton = document.createElement('button');
+        fallbackButton.textContent = 'VR Not Available';
+        fallbackButton.style.position = 'absolute';
+        fallbackButton.style.bottom = '20px';
+        fallbackButton.style.left = '20px';
+        fallbackButton.style.padding = '10px';
+        fallbackButton.style.background = '#ff0000';
+        fallbackButton.style.color = 'white';
+        fallbackButton.style.border = 'none';
+        fallbackButton.style.borderRadius = '5px';
+        fallbackButton.style.zIndex = '1000';
+        fallbackButton.disabled = true;
+        document.body.appendChild(fallbackButton);
+    }
 
     const ambientLight = new THREE.AmbientLight(0x406040, 0.8); // More greenish ambient light for forest
     scene.add(ambientLight);
@@ -103,33 +221,57 @@ function init() {
     scene.add(directionalLight);
 
     // Create environment instead of simple floor
-    environment = new Environment(scene);
-    
+    console.log('Creating environment...');
+    try {
+        environment = new Environment(scene);
+        console.log('Environment created successfully');
+    } catch (error) {
+        console.error('Failed to create environment:', error);
+        // Don't stop execution, environment is optional
+    }
+
     setupXRInteraction();
-    
+
     setupControls();
-    
+
     window.addEventListener('resize', onWindowResize);
     document.addEventListener('click', onMouseClick);
     document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
 
-    // Setup wand controls
-    setupWandControls();
-    
-    audioManager = new AudioManager(state => {
-        audioState = state;
-    });
-    audioManager.attachControls({
-        toggleButton: document.getElementById('audio-toggle'),
-        statusLabel: document.getElementById('audio-status')
-    });
-    audioManager.tryAutoplayOnLoad();
-    
-    for (let i = 0; i < 3; i++) {
-        const x = (Math.random() - 0.5) * boundarySize;
-        const z = (Math.random() - 0.5) * boundarySize;
-        spawnOcelot(x, z);
+    try {
+        audioManager = new AudioManager(state => {
+            audioState = state;
+        });
+        audioManager.attachControls({
+            toggleButton: document.getElementById('audio-toggle'),
+            statusLabel: document.getElementById('audio-status')
+        });
+        audioManager.tryAutoplayOnLoad();
+    } catch (error) {
+        console.error('Failed to initialize audio:', error);
+        // Continue without audio
     }
+
+    // Evenly distribute cats across the map using a jittered grid.
+    // Pick a grid size large enough to hold 4–8 cats; place one per cell with random offset.
+    const catCount = 4 + Math.floor(Math.random() * 5); // 4–8 cats
+    const cols = Math.ceil(Math.sqrt(catCount));
+    const rows = Math.ceil(catCount / cols);
+    const margin = 4; // keep cats away from edge
+    const usable = boundarySize - margin * 2;
+    const cellW = usable / cols;
+    const cellH = usable / rows;
+    let spawned = 0;
+    for (let row = 0; row < rows && spawned < catCount; row++) {
+        for (let col = 0; col < cols && spawned < catCount; col++) {
+            const x = -usable / 2 + col * cellW + cellW * (0.2 + Math.random() * 0.6);
+            const z = -usable / 2 + row * cellH + cellH * (0.2 + Math.random() * 0.6);
+            spawnOcelot(x, z);
+            spawned++;
+        }
+    }
+    console.log(`Spawned ${catCount} cats`);
 
     // Seed the scene with ambient butterflies
     const butterflyCount = 10 + Math.floor(Math.random() * 6); // 10–15
@@ -138,6 +280,7 @@ function init() {
         const z = (Math.random() - 0.5) * boundarySize;
         spawnButterfly(x, z);
     }
+    console.log(`Spawned ${butterflyCount} butterflies`);
 
     updateControlInstructions();
     updateDashboard();
@@ -152,21 +295,47 @@ function init() {
         renderer.setAnimationLoop(null);
         startStandardRenderLoop();
     });
+
+    console.log('Initialization complete');
+}
+
+function displayFatalError(message) {
+    const errorDiv = document.createElement('div');
+    errorDiv.style.position = 'fixed';
+    errorDiv.style.top = '0';
+    errorDiv.style.left = '0';
+    errorDiv.style.width = '100%';
+    errorDiv.style.height = '100%';
+    errorDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+    errorDiv.style.color = 'white';
+    errorDiv.style.display = 'flex';
+    errorDiv.style.flexDirection = 'column';
+    errorDiv.style.alignItems = 'center';
+    errorDiv.style.justifyContent = 'center';
+    errorDiv.style.fontSize = '24px';
+    errorDiv.style.zIndex = '9999';
+    errorDiv.innerHTML = `
+        <h2>Application Error</h2>
+        <p>${message}</p>
+        <p>Please check the browser console for more details.</p>
+        <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #FFD700; color: black; border: none; border-radius: 5px; cursor: pointer;">Reload Page</button>
+    `;
+    document.body.appendChild(errorDiv);
 }
 
 function updateControlInstructions() {
     const spawnInstruction = document.getElementById('spawn-instruction');
     const cameraInstruction = document.getElementById('camera-instruction');
-    
+
     if (deviceType === 'desktop') {
         spawnInstruction.textContent = 'Click floor to spawn | Click cat to interact';
-        cameraInstruction.textContent = 'Drag to rotate view | Scroll to zoom | Enter VR for hand interaction';
+        cameraInstruction.textContent = 'Drag to rotate view | Scroll to zoom | Enter VR for hand interaction | C: toggle viewfinder | Space: capture scene';
     } else if (deviceType === 'mobile') {
         spawnInstruction.textContent = 'Tap floor to spawn | Tap cat to interact';
         cameraInstruction.textContent = 'Drag to rotate view | Pinch to zoom | Enter VR for hand interaction';
     } else {
-        spawnInstruction.textContent = 'Interact with controller/hand rays to trigger cat reactions';
-        cameraInstruction.textContent = 'Use controller to rotate/move and interact with cats';
+        spawnInstruction.textContent = 'Point controller ray at a cat and pull trigger to interact';
+        cameraInstruction.textContent = 'Left stick: move · Right stick: look';
     }
 }
 
@@ -178,7 +347,7 @@ function setupXRInteraction() {
         const controller = renderer.xr.getController(i);
         controller.userData.sourceId = `controller-${i + 1}`;
         controller.addEventListener('selectstart', onXRSelectStart);
-        scene.add(controller);
+        cameraRig.add(controller);
         xrControllers.push(controller);
 
         const controllerRay = new THREE.Line(
@@ -193,50 +362,19 @@ function setupXRInteraction() {
 
         const grip = renderer.xr.getControllerGrip(i);
         grip.add(controllerModelFactory.createControllerModel(grip));
-        scene.add(grip);
-
-        // Add wand to controller grip
-        const wandGroup = createWandMesh();
-        wandGroup.rotation.x = Math.PI / 2;
-        wandGroup.position.z = -0.1;
-        grip.add(wandGroup);
-        grip.userData.wand = wandGroup;
-        grip.userData.wandActive = false;
+        cameraRig.add(grip);
 
         const hand = renderer.xr.getHand(i);
         hand.userData.sourceId = `hand-${i + 1}`;
         hand.add(handModelFactory.createHandModel(hand, 'mesh'));
-        scene.add(hand);
+        cameraRig.add(hand);
         xrHands.push(hand);
     }
 }
 
-function createWandMesh() {
-    // Create a simple wand with a rod and a feather
-    const wandGroup = new THREE.Group();
-    
-    // Rod (cylinder)
-    const rodGeometry = new THREE.CylinderGeometry(0.02, 0.02, 1.5, 8);
-    const rodMaterial = new THREE.MeshBasicMaterial({ color: 0x8B4513 }); // Brown
-    const rod = new THREE.Mesh(rodGeometry, rodMaterial);
-    rod.rotation.x = Math.PI / 2;
-    rod.position.x = 0.75;
-    wandGroup.add(rod);
-    
-    // Feather (cone)
-    const featherGeometry = new THREE.ConeGeometry(0.15, 0.5, 8);
-    const featherMaterial = new THREE.MeshBasicMaterial({ color: 0xFF69B4 }); // Pink
-    const feather = new THREE.Mesh(featherGeometry, featherMaterial);
-    feather.position.x = 1.5;
-    feather.rotation.z = Math.PI / 2;
-    wandGroup.add(feather);
-    
-    return wandGroup;
-}
-
 function setupControls() {
     console.log('Setting up controls for device type:', deviceType);
-    
+
     if (deviceType === 'desktop') {
         document.addEventListener('mousedown', onMouseDown);
         document.addEventListener('mousemove', onMouseMove);
@@ -251,101 +389,6 @@ function setupControls() {
     }
 }
 
-function setupWandControls() {
-    const wandToggle = document.getElementById('wand-toggle');
-    if (wandToggle) {
-        wandToggle.addEventListener('click', toggleWand);
-    }
-    
-    // Add keyboard shortcut for desktop testing
-    document.addEventListener('keydown', (event) => {
-        if (event.code === 'KeyW') {
-            toggleWand();
-        }
-    });
-}
-
-function toggleWand() {
-    wandActive = !wandActive;
-    const wandToggle = document.getElementById('wand-toggle');
-    const wandStatus = document.getElementById('wand-status');
-    
-    if (wandActive) {
-        wandToggle.textContent = 'Deactivate Wand';
-        wandToggle.classList.add('active');
-        wandStatus.textContent = 'Active';
-        createWand();
-    } else {
-        wandToggle.textContent = 'Activate Wand';
-        wandToggle.classList.remove('active');
-        wandStatus.textContent = 'Inactive';
-        removeWand();
-    }
-    
-    updateDashboard();
-}
-
-function createWand() {
-    if (wandMesh) return; // Wand already exists
-    
-    // Create a simple wand with a rod and a feather
-    const wandGroup = new THREE.Group();
-    
-    // Rod (cylinder)
-    const rodGeometry = new THREE.CylinderGeometry(0.02, 0.02, 1.5, 8);
-    const rodMaterial = new THREE.MeshBasicMaterial({ color: 0x8B4513 }); // Brown
-    const rod = new THREE.Mesh(rodGeometry, rodMaterial);
-    rod.rotation.x = Math.PI / 2;
-    rod.position.x = 0.75;
-    wandGroup.add(rod);
-    
-    // Feather (cone)
-    const featherGeometry = new THREE.ConeGeometry(0.15, 0.5, 8);
-    const featherMaterial = new THREE.MeshBasicMaterial({ color: 0xFF69B4 }); // Pink
-    const feather = new THREE.Mesh(featherGeometry, featherMaterial);
-    feather.position.x = 1.5;
-    feather.rotation.z = Math.PI / 2;
-    wandGroup.add(feather);
-    
-    wandMesh = wandGroup;
-    
-    // Add wand to scene for desktop mode (attached to camera)
-    if (deviceType === 'desktop') {
-        wandMesh.position.set(0, 0, -2); // In front of camera
-        camera.add(wandMesh);
-    }
-}
-
-function removeWand() {
-    if (wandMesh) {
-        if (deviceType === 'desktop') {
-            camera.remove(wandMesh);
-        }
-        wandMesh = null;
-    }
-}
-
-function updateWandPosition() {
-    if (!wandActive) return;
-    
-    if (deviceType === 'desktop' && wandMesh) {
-        // For desktop, wand position is relative to camera
-        wandPosition.setFromMatrixPosition(wandMesh.matrixWorld);
-    } else if (renderer.xr.isPresenting) {
-        // For VR, get wand position from active controller
-        for (let i = 0; i < xrControllers.length; i++) {
-            const grip = renderer.xr.getControllerGrip(i);
-            if (grip && grip.userData.wand) {
-                // Get the position of the wand tip (feather position)
-                const wandTipPosition = new THREE.Vector3(1.5, 0, 0);
-                wandTipPosition.applyMatrix4(grip.userData.wand.matrixWorld);
-                wandPosition.copy(wandTipPosition);
-                break;
-            }
-        }
-    }
-}
-
 function onMouseDown(event) {
     isDragging = true;
     hasDragged = false;
@@ -354,20 +397,20 @@ function onMouseDown(event) {
 
 function onMouseMove(event) {
     if (!isDragging) return;
-    
+
     const deltaX = event.clientX - previousMousePosition.x;
     const deltaY = event.clientY - previousMousePosition.y;
-    
+
     // Mark as dragged if moved more than a small threshold
     if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
         hasDragged = true;
     }
-    
+
     cameraAngle += deltaX * 0.01;
     cameraHeight = Math.max(3, Math.min(20, cameraHeight - deltaY * 0.05));
-    
+
     updateCameraPosition();
-    
+
     previousMousePosition = { x: event.clientX, y: event.clientY };
 }
 
@@ -391,15 +434,15 @@ function onTouchStart(event) {
 function onTouchMove(event) {
     if (!isDragging || event.touches.length !== 1) return;
     event.preventDefault();
-    
+
     const deltaX = event.touches[0].clientX - previousMousePosition.x;
     const deltaY = event.touches[0].clientY - previousMousePosition.y;
-    
+
     cameraAngle += deltaX * 0.01;
     cameraHeight = Math.max(3, Math.min(20, cameraHeight - deltaY * 0.05));
-    
+
     updateCameraPosition();
-    
+
     previousMousePosition = { x: event.touches[0].clientX, y: event.touches[0].clientY };
 }
 
@@ -408,18 +451,42 @@ function onTouchEnd() {
 }
 
 function spawnOcelot(x, z) {
-    const ocelot = createOcelot({
-        position: new THREE.Vector3(x, 0, z),
-        boundarySize: boundarySize
-    });
-    
-    ocelots.push(ocelot);
-    scene.add(ocelot.group);
-    registerOcelotMeshes(ocelot);
-    
-    updateDashboard();
-    
-    return ocelot;
+    try {
+        const ocelot = createOcelot({
+            position: new THREE.Vector3(x, 0, z),
+            boundarySize: boundarySize
+        });
+
+        if (ocelot && ocelot.group) {
+            ocelots.push(ocelot);
+            scene.add(ocelot.group);
+            registerOcelotMeshes(ocelot);
+
+            updateDashboard();
+            return ocelot;
+        }
+    } catch (error) {
+        console.error('Failed to spawn ocelot at', x, z, ':', error);
+        return null;
+    }
+}
+
+function spawnButterfly(x, z) {
+    try {
+        const butterfly = createButterfly({
+            position: new THREE.Vector3(x, 3 + Math.random() * 4, z),
+            boundarySize
+        });
+
+        if (butterfly && butterfly.group) {
+            butterflies.push(butterfly);
+            scene.add(butterfly.group);
+            return butterfly;
+        }
+    } catch (error) {
+        console.error('Failed to spawn butterfly at', x, z, ':', error);
+        return null;
+    }
 }
 
 function registerOcelotMeshes(ocelot) {
@@ -431,25 +498,12 @@ function registerOcelotMeshes(ocelot) {
     });
 }
 
-function spawnButterfly(x, z) {
-    const butterfly = createButterfly({
-        position: new THREE.Vector3(x, 3 + Math.random() * 4, z),
-        boundarySize
-    });
-    butterflies.push(butterfly);
-    scene.add(butterfly.group);
-    return butterfly;
-}
-
 function updateDashboard() {
     const catCount = document.getElementById('cat-count');
     const actionSummary = document.getElementById('action-summary');
     const interactionStatus = document.getElementById('interaction-status');
     const audioTrack = document.getElementById('audio-track');
     const audioPlayback = document.getElementById('audio-playback');
-    const wandStatus = document.getElementById('wand-status');
-    const wandInteractionsEl = document.getElementById('wand-interactions');
-
     if (catCount) {
         catCount.textContent = ocelots.length;
     }
@@ -478,14 +532,6 @@ function updateDashboard() {
         const muteText = audioState.isMuted ? 'Muted' : 'Unmuted';
         audioPlayback.textContent = `${audioState.status} | ${muteText}`;
     }
-    
-    if (wandStatus) {
-        wandStatus.textContent = wandActive ? 'Active' : 'Inactive';
-    }
-    
-    if (wandInteractionsEl) {
-        wandInteractionsEl.textContent = wandInteractions;
-    }
 }
 
 function onMouseClick(event) {
@@ -498,10 +544,10 @@ function onMouseClick(event) {
         hasDragged = false;
         return;
     }
-    
+
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    
+
     raycaster.setFromCamera(mouse, camera);
 
     const ocelotHits = raycaster.intersectObjects(ocelotMeshes, false);
@@ -513,29 +559,26 @@ function onMouseClick(event) {
         }
     }
 
-    // Raycast against the environment ground
-    const intersects = raycaster.intersectObject(environment.ground);
-    
-    if (intersects.length > 0) {
-        const point = intersects[0].point;
-        const clampedX = Math.max(-boundarySize + 2, Math.min(boundarySize - 2, point.x));
-        const clampedZ = Math.max(-boundarySize + 2, Math.min(boundarySize - 2, point.z));
-        spawnOcelot(clampedX, clampedZ);
-    }
+    // Raycast against the environment ground — floor clicks no longer spawn cats
+    // (spawning is handled automatically on load)
 }
 
 function triggerOcelotInteraction(ocelot, sourceId) {
     const interaction = ocelot.interact(sourceId);
-    if (interaction.sound) {
+    if (interaction.sound && audioManager) {
         audioManager.playSfx(interaction.sound);
     }
+    ocelot.notifyInteraction();
     lastInteractionLabel = `${sourceId}: ${interaction.sound || 'no-sound'}`;
     updateDashboard();
 }
 
 function onKeyDown(event) {
     if (event.code === 'Space') {
-        spawnOcelot(0, 0);
+        if (cameraViewfinderActive) {
+            captureScene();
+        }
+        event.preventDefault(); // Prevent default spacebar behavior
     } else if (event.code === 'ArrowLeft') {
         cameraAngle -= 0.1;
         updateCameraPosition();
@@ -548,9 +591,14 @@ function onKeyDown(event) {
     } else if (event.code === 'ArrowDown') {
         cameraRadius = Math.min(30, cameraRadius + 1);
         updateCameraPosition();
-    } else if (event.code === 'KeyW') {
-        toggleWand();
+    } else if (event.code === 'KeyC') {
+        toggleViewfinder();
     }
+}
+
+function onKeyUp(event) {
+    // Placeholder for keyboard up events if needed
+    // Currently no specific keyup handling required
 }
 
 function updateCameraPosition() {
@@ -564,13 +612,23 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+
+    // Ensure canvas is visible and properly sized
+    const canvas = renderer.domElement;
+    if (canvas) {
+        canvas.style.display = 'block';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+    }
 }
 
 function onXRSelectStart(event) {
     const controller = event.target;
     const interactionTarget = raycastOcelotFromXR(controller);
-    if (!interactionTarget) return;
-    triggerOcelotInteraction(interactionTarget, controller.userData.sourceId);
+
+    if (interactionTarget) {
+        triggerOcelotInteraction(interactionTarget, controller.userData.sourceId);
+    }
 }
 
 function raycastOcelotFromXR(sourceObject) {
@@ -618,39 +676,91 @@ function handleXRHandInteractions() {
     });
 }
 
-function renderFrame() {
-    ocelots.forEach(ocelot => {
-        ocelot.animate();
-        
-        // Handle wand interactions
-        if (wandActive) {
-            const response = ocelot.respondToWand(wandPosition);
-            if (response === 'playful') {
-                wandInteractions++;
-            }
+function handleXRLocomotion(delta) {
+    if (!renderer.xr.isPresenting) return;
+
+    const session = renderer.xr.getSession();
+    if (!session) return;
+
+    for (const source of session.inputSources) {
+        if (!source.gamepad) continue;
+        const axes = source.gamepad.axes;
+        if (!axes || axes.length < 4) continue;
+
+        const stickX = Math.abs(axes[2]) > VR_DEAD_ZONE ? axes[2] : 0;
+        const stickY = Math.abs(axes[3]) > VR_DEAD_ZONE ? axes[3] : 0;
+
+        if (source.handedness === 'left') {
+            // Translate relative to current rig yaw
+            const yaw = cameraRig.rotation.y;
+            const fwdX = -Math.sin(yaw);
+            const fwdZ = -Math.cos(yaw);
+            cameraRig.position.x += (fwdX * (-stickY) + Math.cos(yaw) * stickX) * VR_MOVE_SPEED * delta;
+            cameraRig.position.z += (fwdZ * (-stickY) + (-Math.sin(yaw)) * stickX) * VR_MOVE_SPEED * delta;
+
+            const half = boundarySize / 2;
+            cameraRig.position.x = Math.max(-half, Math.min(half, cameraRig.position.x));
+            cameraRig.position.z = Math.max(-half, Math.min(half, cameraRig.position.z));
+        } else if (source.handedness === 'right') {
+            cameraRig.rotation.y -= stickX * VR_LOOK_SPEED * delta;
         }
-    });
-
-    butterflies.forEach(butterfly => {
-        butterfly.animate();
-    });
-
-    // Update environment if it has an update method
-    if (environment && typeof environment.update === 'function') {
-        environment.update();
     }
+}
 
-    handleXRHandInteractions();
-    updateWandPosition();
-    updateDashboard();
-    renderer.render(scene, camera);
+function renderFrame(time = performance.now()) {
+    try {
+        const delta = Math.min((time - lastFrameTime) / 1000, 0.1);
+        lastFrameTime = time;
+
+        ocelots.forEach(ocelot => {
+            ocelot.animate();
+        });
+
+        butterflies.forEach(butterfly => {
+            butterfly.animate();
+        });
+
+        // Update environment if it has an update method
+        if (environment && typeof environment.update === 'function') {
+            environment.update();
+        }
+
+        handleXRLocomotion(delta);
+        handleXRHandInteractions();
+
+        updateDashboard();
+        renderer.render(scene, camera);
+    } catch (error) {
+        console.error('Error in render loop:', error);
+        // Display error message on screen
+        const errorMessage = document.createElement('div');
+        errorMessage.id = 'render-error';
+        errorMessage.style.position = 'absolute';
+        errorMessage.style.top = '10px';
+        errorMessage.style.right = '10px';
+        errorMessage.style.background = 'rgba(255, 0, 0, 0.8)';
+        errorMessage.style.color = 'white';
+        errorMessage.style.padding = '10px';
+        errorMessage.style.borderRadius = '5px';
+        errorMessage.style.zIndex = '1000';
+        errorMessage.style.maxWidth = '300px';
+        errorMessage.innerHTML = `
+            <strong>Rendering Error:</strong><br>
+            ${error.message}<br>
+            <small>Check console for details</small>
+        `;
+        document.body.appendChild(errorMessage);
+
+        // Stop the render loop to prevent continuous errors
+        renderer.setAnimationLoop(null);
+    }
 }
 
 function startStandardRenderLoop() {
     if (standardAnimationFrameId !== null) return;
 
-    const loop = () => {
-        renderFrame();
+    const loop = (time) => {
+        renderFrame(time);
         standardAnimationFrameId = requestAnimationFrame(loop);
     };
 
@@ -663,4 +773,5 @@ function stopStandardRenderLoop() {
     standardAnimationFrameId = null;
 }
 
+// Initialize the application
 init();

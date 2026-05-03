@@ -17,17 +17,19 @@ function classifyAudioAssets() {
     const bgTracks = sorted.filter(item => item.name.startsWith('bg-')).map(item => item.url);
     const meowTracks = sorted.filter(item => item.name.startsWith('meow-')).map(item => item.url);
     const purrTracks = sorted.filter(item => item.name.startsWith('purr-')).map(item => item.url);
+    const shutterTrack = sorted.find(item => item.name.startsWith('shutter'))?.url || null;
 
-    return { bgTracks, meowTracks, purrTracks };
+    return { bgTracks, meowTracks, purrTracks, shutterTrack };
 }
 
 export class AudioManager {
     constructor(onStateChange = () => {}) {
-        const { bgTracks, meowTracks, purrTracks } = classifyAudioAssets();
+        const { bgTracks, meowTracks, purrTracks, shutterTrack } = classifyAudioAssets();
 
         this.bgTracks = bgTracks;
         this.meowTracks = meowTracks;
         this.purrTracks = purrTracks;
+        this.shutterTrack = shutterTrack;
 
         this.bgPlayer = new Audio();
         this.bgPlayer.preload = 'auto';
@@ -161,6 +163,13 @@ export class AudioManager {
             this.syncUi();
             this.emitState();
         });
+    }
+
+    playShutter() {
+        if (!this.shutterTrack) return;
+        const sfx = new Audio(this.shutterTrack);
+        sfx.volume = Math.min(1, this.baseVolume + 0.4);
+        sfx.play().catch(() => {});
     }
 
     getCurrentTrackName() {
