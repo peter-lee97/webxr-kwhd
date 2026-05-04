@@ -16,6 +16,8 @@ let cameraAngle = 0;
 let cameraRadius = 15;
 let cameraHeight = 8;
 const boundarySize = 45;
+let currentRenderer = null;
+let rendererType = 'unknown';
 
 // VR locomotion constants
 const VR_MOVE_SPEED = 3;    // metres per second
@@ -110,7 +112,7 @@ function detectDevice() {
     console.log('Detected device type:', deviceType);
 }
 
-function init() {
+async function init() {
     console.log('Initializing application...');
     const container = document.body;
 
@@ -127,7 +129,7 @@ function init() {
     console.log('Scene created successfully');
 
     scene.background = new THREE.Color(0x87CEEB);
-    scene.fog = new THREE.Fog(0x8bbedd, 20, 100); // Warm amber fog (overridden by Environment)
+    scene.fog = new THREE.Fog(0x87CEEB, 20, 100); // Sky blue fog to match background
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(0, cameraHeight, cameraRadius);
@@ -138,39 +140,20 @@ function init() {
     cameraRig.add(camera);
     scene.add(cameraRig);
 
-    // Create renderer with error handling
+    // Initialize renderer with WebGPU support
     try {
-        renderer = new THREE.WebGLRenderer({ antialias: true });
+        currentRenderer = await initializeRenderer();
+        renderer = currentRenderer;
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.shadowMap.enabled = true;
         renderer.xr.enabled = true;
 
-        // Check if WebGL context is available
-        if (renderer.getContext() === null) {
-            throw new Error('WebGL context not available');
-        }
-
         container.appendChild(renderer.domElement);
         console.log('Renderer created successfully');
     } catch (error) {
-        console.error('Failed to create WebGL renderer:', error);
-        // Create a fallback message
-        const errorMessage = document.createElement('div');
-        errorMessage.style.position = 'absolute';
-        errorMessage.style.top = '50%';
-        errorMessage.style.left = '50%';
-        errorMessage.style.transform = 'translate(-50%, -50%)';
-        errorMessage.style.color = 'white';
-        errorMessage.style.fontSize = '24px';
-        errorMessage.style.textAlign = 'center';
-        errorMessage.style.zIndex = '1000';
-        errorMessage.innerHTML = `
-            <p>WebGL is not supported or unavailable in your browser.</p>
-            <p>Please try updating your browser or using a different one.</p>
-            <p>Error: ${error.message}</p>
-        `;
-        document.body.appendChild(errorMessage);
+        console.error('Failed to initialize renderer:', error);
+        displayFatalError(`Failed to initialize renderer: ${error.message}`);
         return;
     }
 
@@ -321,6 +304,39 @@ function displayFatalError(message) {
         <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #FFD700; color: black; border: none; border-radius: 5px; cursor: pointer;">Reload Page</button>
     `;
     document.body.appendChild(errorDiv);
+}
+
+async function initializeRenderer() {
+    // Try WebGPU first
+    if (navigator.gpu) {
+        try {
+            const adapter = await navigator.gpu.requestAdapter();
+            if (adapter) {
+                const renderer = new THREE.WebGPURenderer({
+                    antialias: true,
+                    xrCompatible: true
+                });
+                console.log('✓ WebGPU renderer initialized');
+                rendererType = 'WebGPU';
+                return renderer;
+            }
+        } catch (error) {
+            console.warn('✗ WebGPU initialization failed:', error.message);
+        }
+    }
+
+    // Fallback to WebGL
+    try {
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true
+        });
+        console.log('✓ WebGL renderer initialized (fallback)');
+        rendererType = 'WebGL';
+        return renderer;
+    } catch (error) {
+        console.error('✗ WebGL initialization failed:', error.message);
+        throw new Error('Both WebGPU and WebGL renderers failed to initialize');
+    }
 }
 
 function updateControlInstructions() {
@@ -531,6 +547,22 @@ function updateDashboard() {
     if (audioPlayback) {
         const muteText = audioState.isMuted ? 'Muted' : 'Unmuted';
         audioPlayback.textContent = `${audioState.status} | ${muteText}`;
+    }
+
+    // Update renderer display with icon and text
+    const rendererIcon = document.getElementById('renderer-status-icon');
+    const rendererName = document.getElementById('renderer-name');
+    if (rendererIcon && rendererName) {
+        if (rendererType === 'WebGPU') {
+            rendererIcon.textContent = '🟢';
+            rendererName.textContent = 'WebGPU';
+        } else if (rendererType === 'WebGL') {
+            rendererIcon.textContent = '🟠';
+            rendererName.textContent = 'WebGL';
+        } else {
+            rendererIcon.textContent = '⏳';
+            rendererName.textContent = 'Initializing...';
+        }
     }
 }
 

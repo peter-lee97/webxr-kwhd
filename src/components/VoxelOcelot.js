@@ -3,7 +3,7 @@ import * as THREE from 'three';
 export class VoxelOcelot {
     constructor(options = {}) {
         try {
-            this.size = options.size || 1;
+            this.size = options.size || 0.6;
             this.position = options.position || new THREE.Vector3(0, 0, 0);
             this.boundarySize = options.boundarySize || 45;
             this.group = new THREE.Group();
