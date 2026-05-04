@@ -4,3 +4,5 @@ dist/
 .vite/
 *.local
 captures/
+key.pem
+cert.pem
