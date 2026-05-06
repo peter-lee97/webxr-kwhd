@@ -20,7 +20,7 @@ const boundarySize = 45;
 let currentRenderer = null;
 let rendererType = 'unknown';
 let controlsPopup = null;
-let dashboardCollapsed = false;
+let dashboardCollapsed = true;
 
 // VR locomotion constants
 const VR_MOVE_SPEED = 3;    // metres per second
@@ -243,6 +243,9 @@ async function init() {
             controlsPopup.show();
         }
     });
+
+    // Initialize dashboard to collapsed state
+    initializeDashboard();
 
     try {
         audioManager = new AudioManager(state => {
@@ -652,6 +655,16 @@ function toggleDashboard() {
     } else {
         dashboard.classList.remove('dashboard-collapsed');
         toggleButton.textContent = '−';
+    }
+}
+
+function initializeDashboard() {
+    // If dashboard should be collapsed by default, apply the collapsed class immediately
+    if (dashboardCollapsed) {
+        const dashboard = document.getElementById('dashboard');
+        const toggleButton = document.getElementById('toggle-dashboard');
+        dashboard.classList.add('dashboard-collapsed');
+        toggleButton.textContent = '+';
     }
 }
 
