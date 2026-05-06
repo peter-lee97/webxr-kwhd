@@ -1,11 +1,11 @@
 # Ocelot VR Experience
 
-A Three.js application featuring procedurally generated voxel-style Ocelot cats on a blank horizon floor.
+A Three.js application featuring procedurally generated voxel-style Ocelot cats in a forest environment.
 
 ## Features
 
-- Procedural generation of voxel-style Ocelot cats with different patterns
-- Interactive spawning system via mouse clicks or keyboard
+- Procedurally generated voxel-style Ocelot cats with different patterns
+- Interactive system with cats automatically placed in the environment
 - Action system with simple cat behaviors: walking, sitting, jumping, stretching, and look-around
 - Basic camera controls for viewing the scene
 - Cursor and WebXR hand/controller interaction with cats (meow/purr reactions)
@@ -14,6 +14,7 @@ A Three.js application featuring procedurally generated voxel-style Ocelot cats 
 - **WebXR support** for VR/AR headsets with hand and controller interaction
 - **WebGPU rendering** with automatic WebGL fallback for modern graphics acceleration
 - **Renderer dashboard indicator** showing current graphics backend (🟢 WebGPU / 🟠 WebGL)
+- **Camera viewfinder mode** with capture functionality
 - HTTPS development server for secure WebXR contexts
 
 ## Installation
@@ -46,12 +47,13 @@ This creates `key.pem` and `cert.pem` files needed for HTTPS development.
 
 ## Controls
 
-- **Mouse/Tap on floor**: Spawn an ocelot
 - **Mouse/Tap on ocelot**: Interact with cat (reaction action + meow/purr SFX)
-- **Spacebar**: Spawn an ocelot at the center of the scene
+- **C key**: Toggle camera viewfinder mode
+- **Spacebar**: Capture scene when in viewfinder mode
 - **Arrow Keys (Left/Right)**: Rotate the camera view
 - **Arrow Keys (Up/Down)**: Zoom camera
 - **VR Button**: Enter WebXR mode (MetaQuest hand/controller interaction)
+  - **Y Button (right controller)**: Toggle camera viewfinder mode
 - **Window Resize**: Automatically adjusts to new window size
 
 ## Project Structure
@@ -62,7 +64,8 @@ src/
 ├── index.html           # HTML template
 ├── style.css            # Basic styles
 ├── components/
-│   └── VoxelOcelot.js   # Procedural Ocelot generation
+│   ├── VoxelOcelot.js   # Procedural Ocelot generation
+│   └── Environment.js   # Forest environment with trees and ground
 └── utils/
     └── MathUtils.js      # Helper functions (for future use)
 ```
@@ -77,6 +80,7 @@ src/
 - **Animation**: Action state machine with reusable behavior animations
 - **Interaction**: Pointer raycasting + XR controller/hand interaction hooks
 - **Audio**: Ordered background loop playlist + meow/purr SFX categorization by file prefix
+- **Environment**: Procedural forest environment with trees and ground
 
 ### Browser Support
 
@@ -102,6 +106,7 @@ Store audio files in `src/assets/audio/`:
 - `bg-*` files: background playlist entries (played in ascending filename order, looped)
 - `meow-*` files: meow reaction SFX
 - `purr-*` files: purr reaction SFX
+- `shutter.mp3`: Camera shutter sound effect
 
 The app preloads audio and attempts autoplay at 5% volume on load. Use the speaker icon to toggle mute/unmute.
 
@@ -112,6 +117,14 @@ The VoxelOcelot class procedurally generates cats using:
 - Randomized color patterns (3 different variations)
 - Vertex coloring for spot patterns
 - Different sizes and animations
+
+## Camera System
+
+The application features a camera system with:
+- Orbital camera that can be rotated and zoomed
+- Viewfinder mode that overlays a camera interface
+- Scene capture functionality with automatic saving
+- VR controller support for toggling viewfinder mode
 
 ## Future Enhancements
 

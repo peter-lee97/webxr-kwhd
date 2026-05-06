@@ -43,38 +43,47 @@
     
     <div id="info">
         <h1>Forest Ocelot VR Experience</h1>
-        <p id="spawn-instruction">Click floor to spawn | Click cat to interact</p>
-        <p id="camera-instruction">Drag to rotate view</p>
+        <p id="spawn-instruction">Click cat to interact</p>
+        <p id="camera-instruction">Drag to rotate view | C: toggle viewfinder | Space: capture scene</p>
+        <p>Press F1 for controls guide</p>
     </div>
     <div id="dashboard">
-        <div class="dashboard-item">
-            <span class="dashboard-label">Cats:</span>
-            <span id="cat-count" class="dashboard-value">0</span>
+        <div class="dashboard-header">
+            <span class="dashboard-title">Stats</span>
+            <button class="dashboard-toggle" id="toggle-dashboard">−</button>
         </div>
-        <div class="dashboard-item">
-            <span class="dashboard-label">Actions:</span>
-            <span id="action-summary" class="dashboard-value dashboard-wide">none</span>
-        </div>
-        <div class="dashboard-item">
-            <span class="dashboard-label">Last interaction:</span>
-            <span id="interaction-status" class="dashboard-value dashboard-wide">none</span>
-        </div>
-        <div class="dashboard-item">
-            <span class="dashboard-label">Track:</span>
-            <span id="audio-track" class="dashboard-value dashboard-wide">none</span>
-        </div>
-        <div class="dashboard-item">
-            <span class="dashboard-label">Audio:</span>
-            <span id="audio-playback" class="dashboard-value dashboard-wide">Ready</span>
-        </div>
-        <div class="dashboard-item">
-            <span class="dashboard-label">Renderer:</span>
-            <span id="renderer-type" class="dashboard-value dashboard-wide">
-                <span id="renderer-status-icon">⏳</span>
-                <span id="renderer-name">Initializing...</span>
-            </span>
+        <div class="dashboard-content">
+            <div class="dashboard-item">
+                <span class="dashboard-label">Cats:</span>
+                <span id="cat-count" class="dashboard-value">0</span>
+            </div>
+            <div class="dashboard-item">
+                <span class="dashboard-label">Actions:</span>
+                <span id="action-summary" class="dashboard-value dashboard-wide">none</span>
+            </div>
+            <div class="dashboard-item">
+                <span class="dashboard-label">Last interaction:</span>
+                <span id="interaction-status" class="dashboard-value dashboard-wide">none</span>
+            </div>
+            <div class="dashboard-item">
+                <span class="dashboard-label">Track:</span>
+                <span id="audio-track" class="dashboard-value dashboard-wide">none</span>
+            </div>
+            <div class="dashboard-item">
+                <span class="dashboard-label">Audio:</span>
+                <span id="audio-playback" class="dashboard-value dashboard-wide">Ready</span>
+            </div>
+            <div class="dashboard-item">
+                <span class="dashboard-label">Renderer:</span>
+                <span id="renderer-type" class="dashboard-value dashboard-wide">
+                    <span id="renderer-status-icon">⏳</span>
+                    <span id="renderer-name">Initializing...</span>
+                </span>
+            </div>
         </div>
     </div>
+    
+    <button id="controls-toggle" class="controls-toggle">?</button>
     <div id="audio-controls">
         <button id="audio-toggle" type="button" aria-label="Mute audio" data-muted="false">
             <svg class="icon icon-unmuted" viewBox="0 0 24 24" aria-hidden="true">

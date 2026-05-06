@@ -6,6 +6,7 @@ import { createOcelot } from './components/VoxelOcelot.js';
 import { createButterfly } from './components/VoxelButterfly.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Environment } from './components/Environment.js';
+import { ControlsPopup } from './components/ControlsPopup.js';
 
 let scene, camera, renderer, cameraRig;
 let ocelots = [];
@@ -18,6 +19,8 @@ let cameraHeight = 8;
 const boundarySize = 45;
 let currentRenderer = null;
 let rendererType = 'unknown';
+let controlsPopup = null;
+let dashboardCollapsed = false;
 
 // VR locomotion constants
 const VR_MOVE_SPEED = 3;    // metres per second
@@ -118,6 +121,15 @@ async function init() {
 
     detectDevice();
     console.log('Device type detected:', deviceType);
+
+    // Initialize controls popup
+    controlsPopup = new ControlsPopup();
+
+    // Show controls button for desktop devices
+    if (deviceType === 'desktop') {
+        const controlsToggle = document.getElementById('controls-toggle');
+        controlsToggle.classList.add('visible');
+    }
 
     // Initialize scene first
     scene = new THREE.Scene();
@@ -221,6 +233,16 @@ async function init() {
     document.addEventListener('click', onMouseClick);
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
+
+    // Add event listener for dashboard toggle
+    document.getElementById('toggle-dashboard').addEventListener('click', toggleDashboard);
+    
+    // Add event listener for controls toggle button
+    document.getElementById('controls-toggle').addEventListener('click', () => {
+        if (controlsPopup) {
+            controlsPopup.show();
+        }
+    });
 
     try {
         audioManager = new AudioManager(state => {
@@ -342,16 +364,25 @@ async function initializeRenderer() {
 function updateControlInstructions() {
     const spawnInstruction = document.getElementById('spawn-instruction');
     const cameraInstruction = document.getElementById('camera-instruction');
+    const infoElement = document.getElementById('info');
 
     if (deviceType === 'desktop') {
-        spawnInstruction.textContent = 'Click floor to spawn | Click cat to interact';
+        spawnInstruction.textContent = 'Click cat to interact';
         cameraInstruction.textContent = 'Drag to rotate view | Scroll to zoom | Enter VR for hand interaction | C: toggle viewfinder | Space: capture scene';
     } else if (deviceType === 'mobile') {
-        spawnInstruction.textContent = 'Tap floor to spawn | Tap cat to interact';
-        cameraInstruction.textContent = 'Drag to rotate view | Pinch to zoom | Enter VR for hand interaction';
+        spawnInstruction.textContent = 'Tap cat to interact';
+        cameraInstruction.textContent = 'Drag to rotate view | Pinch to zoom | Enter VR for hand interaction | C: toggle viewfinder | Space: capture scene';
     } else {
         spawnInstruction.textContent = 'Point controller ray at a cat and pull trigger to interact';
-        cameraInstruction.textContent = 'Left stick: move · Right stick: look';
+        cameraInstruction.textContent = 'Left stick: move · Right stick: look · Y button: toggle viewfinder';
+    }
+    
+    // Add F1 hint if not already present
+    if (infoElement && !document.getElementById('f1-hint')) {
+        const f1Hint = document.createElement('p');
+        f1Hint.id = 'f1-hint';
+        f1Hint.textContent = 'Press F1 for controls guide';
+        infoElement.appendChild(f1Hint);
     }
 }
 
@@ -386,6 +417,10 @@ function setupXRInteraction() {
         cameraRig.add(hand);
         xrHands.push(hand);
     }
+    
+    // Show controls button when XR is available
+    const controlsToggle = document.getElementById('controls-toggle');
+    controlsToggle.classList.add('visible');
 }
 
 function setupControls() {
@@ -605,6 +640,21 @@ function triggerOcelotInteraction(ocelot, sourceId) {
     updateDashboard();
 }
 
+function toggleDashboard() {
+    const dashboard = document.getElementById('dashboard');
+    const toggleButton = document.getElementById('toggle-dashboard');
+    
+    dashboardCollapsed = !dashboardCollapsed;
+    
+    if (dashboardCollapsed) {
+        dashboard.classList.add('dashboard-collapsed');
+        toggleButton.textContent = '+';
+    } else {
+        dashboard.classList.remove('dashboard-collapsed');
+        toggleButton.textContent = '−';
+    }
+}
+
 function onKeyDown(event) {
     if (event.code === 'Space') {
         if (cameraViewfinderActive) {
@@ -717,10 +767,29 @@ function handleXRLocomotion(delta) {
     for (const source of session.inputSources) {
         if (!source.gamepad) continue;
         const axes = source.gamepad.axes;
-        if (!axes || axes.length < 4) continue;
+        const buttons = source.gamepad.buttons;
+        if ((!axes || axes.length < 4) && (!buttons || buttons.length < 3)) continue;
 
         const stickX = Math.abs(axes[2]) > VR_DEAD_ZONE ? axes[2] : 0;
         const stickY = Math.abs(axes[3]) > VR_DEAD_ZONE ? axes[3] : 0;
+
+        // Handle button inputs for camera functions
+        if (buttons && buttons.length >= 3) {
+            // Button mapping for Oculus/Meta Quest controllers:
+            // 0: Trigger (primary interaction)
+            // 1: Grip (side button)
+            // 2: X/Y button (Y button on right controller)
+            
+            // Toggle viewfinder with Y button (button index 2 on right controller)
+            if (source.handedness === 'right' && buttons[2] && buttons[2].pressed) {
+                // Debounce the button press to prevent rapid toggling
+                if (!xrInteractionCooldown.get('viewfinder-toggle')) {
+                    toggleViewfinder();
+                    xrInteractionCooldown.set('viewfinder-toggle', true);
+                    setTimeout(() => xrInteractionCooldown.delete('viewfinder-toggle'), 300);
+                }
+            }
+        }
 
         if (source.handedness === 'left') {
             // Translate relative to current rig yaw
