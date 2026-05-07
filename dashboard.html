@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Captures Dashboard</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #081c08 0%, #123412 100%);
+            color: #d0e0d0;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #a0c0a0;
+            margin-bottom: 2rem;
+            font-size: 2rem;
+            text-align: center;
+        }
+
+        .error-message {
+            background: rgba(139, 0, 0, 0.8);
+            color: #d0e0d0;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            border: 1px solid #8b0000;
+        }
+
+        .success-message {
+            background: rgba(0, 100, 0, 0.8);
+            color: #d0e0d0;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            border: 1px solid #006400;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .controls input {
+            padding: 0.75rem 1rem;
+            border: 1px solid #3a8a3a;
+            border-radius: 4px;
+            background: rgba(26, 74, 26, 0.5);
+            color: #d0e0d0;
+            font-size: 0.9rem;
+        }
+
+        .controls button {
+            padding: 0.75rem 1.5rem;
+            border: 1px solid #3a8a3a;
+            border-radius: 4px;
+            background: rgba(58, 138, 58, 0.3);
+            color: #a0c0a0;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .controls button:hover {
+            background: rgba(58, 138, 58, 0.5);
+        }
+
+        .controls button.delete-btn {
+            background: rgba(139, 0, 0, 0.3);
+            border-color: #8b0000;
+            color: #ff6666;
+        }
+
+        .controls button.delete-btn:hover {
+            background: rgba(139, 0, 0, 0.5);
+        }
+
+        .table-container {
+            background: rgba(18, 52, 18, 0.7);
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #3a8a3a;
+            backdrop-filter: blur(4px);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: rgba(58, 138, 58, 0.3);
+            color: #a0c0a0;
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #3a8a3a;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 0.02em;
+        }
+
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid rgba(42, 106, 42, 0.3);
+            vertical-align: middle;
+        }
+
+        tr:hover td {
+            background: rgba(58, 138, 58, 0.1);
+        }
+
+        .checkbox-cell {
+            width: 40px;
+            text-align: center;
+        }
+
+        .checkbox-cell input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #3a8a3a;
+        }
+
+        .preview-cell {
+            width: 100px;
+            text-align: center;
+        }
+
+        .preview-image {
+            width: 80px;
+            height: 60px;
+            object-fit: cover;
+            border-radius: 4px;
+            border: 1px solid #3a8a3a;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .preview-image:hover {
+            transform: scale(1.05);
+            border-color: #a0c0a0;
+        }
+
+        .name-cell {
+            color: #d0e0d0;
+            font-weight: 500;
+        }
+
+        .size-cell {
+            color: #80a080;
+            font-family: 'SF Mono', 'Fira Code', 'Roboto Mono', monospace;
+            font-size: 0.85rem;
+        }
+
+        .date-cell {
+            color: #80a080;
+            font-size: 0.85rem;
+        }
+
+        .actions-cell {
+            text-align: right;
+            width: 150px;
+        }
+
+        .action-btn {
+            padding: 0.5rem 1rem;
+            border: 1px solid #3a8a3a;
+            border-radius: 3px;
+            background: rgba(26, 74, 26, 0.5);
+            color: #d0e0d0;
+            font-size: 0.8rem;
+            cursor: pointer;
+            margin-left: 0.5rem;
+            transition: background 0.2s;
+        }
+
+        .action-btn:hover {
+            background: rgba(58, 138, 58, 0.7);
+        }
+
+        .action-btn.delete-single {
+            background: rgba(139, 0, 0, 0.3);
+            border-color: #8b0000;
+            color: #ff6666;
+        }
+
+        .action-btn.delete-single:hover {
+            background: rgba(139, 0, 0, 0.5);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem;
+            color: #80a080;
+            font-size: 1.1rem;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 4rem;
+            color: #80a080;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(160, 192, 160, 0.1);
+            border-top-color: #a0c0a0;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .image-preview-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .image-preview-modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            max-width: 90%;
+            max-height: 90%;
+            background: #123412;
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid #3a8a3a;
+        }
+
+        .modal-content img {
+            max-width: 100%;
+            max-height: 80vh;
+            border-radius: 4px;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: none;
+            border: none;
+            color: #a0c0a0;
+            font-size: 2rem;
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+
+        .modal-close:hover {
+            background: rgba(58, 138, 58, 0.3);
+        }
+
+        .selected-count {
+            color: #a0c0a0;
+            font-size: 0.9rem;
+            margin-left: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Captures Dashboard</h1>
+
+        <div id="message"></div>
+
+        <div class="controls">
+            <input type="text" id="searchInput" placeholder="Search captures...">
+            <button onclick="selectAll()">Select All</button>
+            <button onclick="deselectAll()">Deselect All</button>
+            <button onclick="downloadSelected()">Download Selected</button>
+            <button class="delete-btn" onclick="deleteSelected()">Delete Selected</button>
+            <span class="selected-count" id="selectedCount">0 selected</span>
+        </div>
+
+        <div class="table-container">
+            <div id="loading" class="loading">
+                <div class="loading-spinner"></div>
+                <div>Loading captures...</div>
+            </div>
+            <div id="emptyState" class="empty-state" style="display: none;">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 5v14H5V5h14m0 0a2 2 0 0 0-2 2H7a2 2 0 0 0-2-2V5a2 2 0 0 0 2-2h10a2 2 0 0 0 2 2M14 17l-4-4m0 0l-4 4"/>
+                </svg>
+                <div>No captures found</div>
+            </div>
+            <table id="capturesTable" style="display: none;">
+                <thead>
+                    <tr>
+                        <th class="checkbox-cell"><input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAll()"></th>
+                        <th class="preview-cell">Preview</th>
+                        <th>Name</th>
+                        <th>Size</th>
+                        <th>Modified</th>
+                        <th class="actions-cell">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="capturesBody"></tbody>
+            </table>
+        </div>
+
+        <div id="imagePreviewModal" class="image-preview-modal">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <div class="modal-content">
+                <img id="modalImage" src="" alt="Preview">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let captures = [];
+        let selectedFiles = new Set();
+
+        window.onload = function() {
+            loadCaptures();
+            
+            document.getElementById('searchInput').addEventListener('input', function(e) {
+                filterCaptures(e.target.value);
+            });
+        };
+
+        function formatSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleString();
+        }
+
+        function showMessage(message, isError = false) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.className = isError ? 'error-message' : 'success-message';
+            messageDiv.textContent = message;
+            setTimeout(() => {
+                messageDiv.textContent = '';
+                messageDiv.className = '';
+            }, 5000);
+        }
+
+        async function loadCaptures() {
+            try {
+                console.log('🔍 [DEBUG] Loading captures from /downloads...');
+                const response = await fetch('/downloads');
+
+                console.log('🔍 [DEBUG] Response status:', response.status);
+                console.log('🔍 [DEBUG] Response ok:', response.ok);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ [ERROR] Failed response:', errorText);
+                    throw new Error(`Failed to load captures: ${response.status} ${errorText}`);
+                }
+
+                const data = await response.json();
+                console.log('✅ [DEBUG] Loaded data:', data);
+                captures = data.files || [];
+                renderCaptures();
+            } catch (error) {
+                console.error('❌ [ERROR] Load captures failed:', error);
+                showMessage(error.message, true);
+            }
+        }
+
+        function renderCaptures(filteredCaptures = null) {
+            const filesToRender = filteredCaptures || captures;
+            const tbody = document.getElementById('capturesBody');
+            const loading = document.getElementById('loading');
+            const emptyState = document.getElementById('emptyState');
+            const table = document.getElementById('capturesTable');
+
+            loading.style.display = 'none';
+
+            if (filesToRender.length === 0) {
+                emptyState.style.display = 'block';
+                table.style.display = 'none';
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            table.style.display = 'table';
+
+            tbody.innerHTML = filesToRender.map(file => `
+                <tr data-filename="${file.name}">
+                    <td class="checkbox-cell">
+                        <input type="checkbox" 
+                               value="${file.name}" 
+                               ${selectedFiles.has(file.name) ? 'checked' : ''}
+                               onchange="toggleSelection('${file.name}')">
+                    </td>
+                    <td class="preview-cell">
+                        <img class="preview-image" 
+                             src="/downloads/${file.name}" 
+                             alt="${file.name}"
+                             onclick="openModal('/downloads/${file.name}')">
+                    </td>
+                    <td class="name-cell">${file.name}</td>
+                    <td class="size-cell">${formatSize(file.size)}</td>
+                    <td class="date-cell">${formatDate(file.modified)}</td>
+                    <td class="actions-cell">
+                        <button class="action-btn" onclick="downloadFile('${file.name}')">Download</button>
+                        <button class="action-btn delete-single" onclick="deleteFile('${file.name}')">Delete</button>
+                    </td>
+                </tr>
+            `).join('');
+
+            updateSelectedCount();
+        }
+
+        function filterCaptures(searchTerm) {
+            const term = searchTerm.toLowerCase();
+            const filtered = captures.filter(file => 
+                file.name.toLowerCase().includes(term)
+            );
+            renderCaptures(filtered);
+        }
+
+        function toggleSelection(filename) {
+            if (selectedFiles.has(filename)) {
+                selectedFiles.delete(filename);
+            } else {
+                selectedFiles.add(filename);
+            }
+            updateSelectedCount();
+        }
+
+        function selectAll() {
+            captures.forEach(file => selectedFiles.add(file.name));
+            updateCheckboxes();
+            updateSelectedCount();
+        }
+
+        function deselectAll() {
+            selectedFiles.clear();
+            updateCheckboxes();
+            updateSelectedCount();
+        }
+
+        function toggleSelectAll() {
+            const checkbox = document.getElementById('selectAllCheckbox');
+            if (checkbox.checked) {
+                selectAll();
+            } else {
+                deselectAll();
+            }
+        }
+
+        function updateCheckboxes() {
+            document.querySelectorAll('tbody input[type="checkbox"]').forEach(cb => {
+                cb.checked = selectedFiles.has(cb.value);
+            });
+            document.getElementById('selectAllCheckbox').checked = selectedFiles.size === captures.length;
+        }
+
+        function updateSelectedCount() {
+            document.getElementById('selectedCount').textContent = `${selectedFiles.size} selected`;
+        }
+
+        async function downloadFile(filename) {
+            try {
+                console.log('🔍 [DEBUG] Downloading file:', filename);
+                const response = await fetch(`/downloads/${filename}`);
+
+                if (!response.ok) {
+                    throw new Error(`Failed to download file: ${response.status}`);
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                showMessage(`Downloaded ${filename}`);
+            } catch (error) {
+                console.error('❌ [ERROR] Download failed:', error);
+                showMessage(error.message, true);
+            }
+        }
+
+        async function deleteFile(filename) {
+            if (!confirm(`Are you sure you want to delete ${filename}?`)) {
+                return;
+            }
+
+            try {
+                console.log('🔍 [DEBUG] Deleting file:', filename);
+                const response = await fetch(`/downloads/${filename}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to delete file: ${response.status}`);
+                }
+
+                captures = captures.filter(f => f.name !== filename);
+                selectedFiles.delete(filename);
+                renderCaptures();
+                showMessage(`Deleted ${filename}`);
+            } catch (error) {
+                console.error('❌ [ERROR] Delete failed:', error);
+                showMessage(error.message, true);
+            }
+        }
+
+        async function downloadSelected() {
+            if (selectedFiles.size === 0) {
+                showMessage('No files selected', true);
+                return;
+            }
+
+            console.log('🔍 [DEBUG] Downloading selected files:', Array.from(selectedFiles));
+            for (const filename of selectedFiles) {
+                await downloadFile(filename);
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        async function deleteSelected() {
+            if (selectedFiles.size === 0) {
+                showMessage('No files selected', true);
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to delete ${selectedFiles.size} file(s)?`)) {
+                return;
+            }
+
+            const filesToDelete = Array.from(selectedFiles);
+            let deletedCount = 0;
+
+            for (const filename of filesToDelete) {
+                try {
+                    console.log('🔍 [DEBUG] Deleting selected file:', filename);
+                    const response = await fetch(`/downloads/${filename}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        captures = captures.filter(f => f.name !== filename);
+                        selectedFiles.delete(filename);
+                        deletedCount++;
+                    } else {
+                        console.error('❌ [ERROR] Failed to delete:', filename, response.status);
+                    }
+                } catch (error) {
+                    console.error('❌ [ERROR] Delete error:', error);
+                    showMessage(`Failed to delete ${filename}`, true);
+                }
+            }
+
+            renderCaptures();
+            if (deletedCount > 0) {
+                showMessage(`Deleted ${deletedCount} file(s)`);
+            }
+        }
+
+        function openModal(imageUrl) {
+            const modal = document.getElementById('imagePreviewModal');
+            const image = document.getElementById('modalImage');
+            image.src = imageUrl;
+            modal.classList.add('active');
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('imagePreviewModal');
+            modal.classList.remove('active');
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+
+        document.getElementById('imagePreviewModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>
