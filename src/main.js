@@ -2,11 +2,65 @@ import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
 import { XRHandModelFactory } from 'three/examples/jsm/webxr/XRHandModelFactory.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { createOcelot } from './components/VoxelOcelot.js';
 import { createButterfly } from './components/VoxelButterfly.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Environment } from './components/Environment.js';
 import { ControlsPopup } from './components/ControlsPopup.js';
+
+// Barrel distortion shader simulating a wide-angle (28mm) lens
+const BarrelDistortionShader = {
+    uniforms: {
+        tDiffuse: { value: null },
+        k0: { value: 0.0 },
+        k1: { value: 0.24 },
+        k2: { value: 0.06 },
+        vignette: { value: 0.0 },
+        zoom: { value: 1.0 },
+        strength: { value: 0.0 },
+    },
+    vertexShader: /* glsl */`
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    `,
+    fragmentShader: /* glsl */`
+        uniform sampler2D tDiffuse;
+        uniform float k0;
+        uniform float k1;
+        uniform float k2;
+        uniform float vignette;
+        uniform float zoom;
+        uniform float strength;
+        varying vec2 vUv;
+
+        vec2 distort(vec2 uv) {
+            vec2 p = (uv - 0.5) * zoom;
+            float r = length(p);
+            float r2 = dot(p, p);
+            float barrel = 1.0 + strength * (k0 * r + k1 * r2 + k2 * r2 * r2);
+            return p * barrel + 0.5;
+        }
+
+        void main() {
+            vec2 distortedUv = mix(vUv, distort(vUv), strength);
+            vec2 finalUv = clamp(distortedUv, vec2(0.001), vec2(0.999));
+            vec4 color = texture2D(tDiffuse, finalUv);
+
+            vec2 vignetteUv = (vUv - 0.5) * 1.6;
+            float vignetteMask = smoothstep(0.10, 0.85, dot(vignetteUv, vignetteUv));
+            color.rgb *= 1.0 - (vignette * vignetteMask);
+
+            gl_FragColor = color;
+        }
+    `
+};
 
 let scene, camera, renderer, cameraRig;
 let ocelots = [];
@@ -56,11 +110,80 @@ let cameraViewfinderActive = false;
 let captureCounter = 0; // For incremental folder naming
 const viewfinderOverlay = document.getElementById('viewfinder-overlay');
 const captureFlash = document.getElementById('capture-flash');
+const lensLabel = document.getElementById('vf-lens-label');
 
-function toggleViewfinder() {
-    cameraViewfinderActive = !cameraViewfinderActive;
+// Lens effect state
+const DEFAULT_FOV = 75; // baseline scene camera when viewfinder is off
+const LENS_PRESETS = [
+    { label: '150MM', fov: 30, strength: 0.0, k0: 0.0, k1: 0.0, k2: 0.0, zoom: 1.0, vignette: 0.0 },
+    { label: '50MM', fov: 75, strength: 0.0, k0: 0.0, k1: 0.0, k2: 0.0, zoom: 1.0, vignette: 0.0 },
+    { label: '24MM', fov: 98, strength: 1.0, k0: 0.02, k1: 0.24, k2: 0.06, zoom: 0.85, vignette: 0.08 },
+    { label: '18MM', fov: 112, strength: 1.4, k0: 0.24, k1: 0.48, k2: 0.18, zoom: 0.67, vignette: 0.26 }
+];
+let activeLensIndex = -1;
+let targetFov = DEFAULT_FOV;
+let currentFov = DEFAULT_FOV;
+let targetLensStrength = 0.0;
+let targetLensK0 = 0.0;
+let targetLensK1 = 0.0;
+let targetLensK2 = 0.0;
+let targetLensZoom = 1.0;
+let targetLensVignette = 0.0;
+let wideAngleComposer = null;
+let wideAnglePass = null;
+
+function applyLensPreset(index) {
+    activeLensIndex = index;
+    cameraViewfinderActive = index >= 0;
     viewfinderOverlay.style.display = cameraViewfinderActive ? 'block' : 'none';
     document.body.classList.toggle('viewfinder-active', cameraViewfinderActive);
+
+    if (!cameraViewfinderActive) {
+        targetFov = DEFAULT_FOV;
+        targetLensStrength = 0.0;
+        targetLensK0 = 0.0;
+        targetLensK1 = 0.0;
+        targetLensK2 = 0.0;
+        targetLensZoom = 1.0;
+        targetLensVignette = 0.0;
+        if (lensLabel) lensLabel.textContent = 'OFF';
+        return;
+    }
+
+    const preset = LENS_PRESETS[index];
+    targetFov = preset.fov;
+    targetLensStrength = preset.strength;
+    targetLensK0 = preset.k0;
+    targetLensK1 = preset.k1;
+    targetLensK2 = preset.k2;
+    targetLensZoom = preset.zoom;
+    targetLensVignette = preset.vignette;
+
+    if (lensLabel) lensLabel.textContent = preset.label;
+}
+
+function cycleLensMode() {
+    const nextLensIndex = activeLensIndex >= LENS_PRESETS.length - 1 ? -1 : activeLensIndex + 1;
+    applyLensPreset(nextLensIndex);
+}
+
+function initWideAngleLens() {
+    // Only available with WebGL renderer (not WebGPU)
+    if (rendererType !== 'WebGL') return;
+
+    wideAngleComposer = new EffectComposer(renderer);
+    wideAngleComposer.setPixelRatio(window.devicePixelRatio);
+    wideAngleComposer.addPass(new RenderPass(scene, camera));
+
+    wideAnglePass = new ShaderPass(BarrelDistortionShader);
+    wideAnglePass.uniforms.strength.value = 0.0;
+    wideAnglePass.uniforms.k0.value = 0.0;
+    wideAnglePass.uniforms.k1.value = 0.0;
+    wideAnglePass.uniforms.k2.value = 0.0;
+    wideAnglePass.uniforms.vignette.value = 0.0;
+    wideAnglePass.uniforms.zoom.value = 1.0;
+    wideAngleComposer.addPass(wideAnglePass);
+    wideAngleComposer.addPass(new OutputPass());
 }
 
 async function captureScene() {
@@ -73,7 +196,11 @@ async function captureScene() {
     const countEl = document.getElementById('vf-capture-count');
     if (countEl) countEl.textContent = captureCounter.toString().padStart(3, '0');
     
-    renderer.render(scene, camera);
+    if (cameraViewfinderActive && wideAngleComposer) {
+        wideAngleComposer.render();
+    } else {
+        renderer.render(scene, camera);
+    }
     const dataUrl = renderer.domElement.toDataURL('image/png');
     
     try {
@@ -163,6 +290,9 @@ async function init() {
         
         container.appendChild(renderer.domElement);
         console.log('Renderer created successfully');
+
+        // Initialize wide-angle lens post-processing (WebGL only)
+        initWideAngleLens();
     } catch (error) {
         console.error('Failed to initialize renderer:', error);
         displayFatalError(`Failed to initialize renderer: ${error.message}`);
@@ -374,13 +504,13 @@ function updateControlInstructions() {
     
     if (deviceType === 'desktop') {
         spawnInstruction.textContent = 'Click cat to interact';
-        cameraInstruction.textContent = 'Drag to rotate view | Scroll to zoom | Enter VR for hand interaction | C: toggle viewfinder | Space: capture scene';
+        cameraInstruction.textContent = 'Drag to rotate view | Scroll to zoom | Enter VR for hand interaction | C: cycle lens | Space: capture scene';
     } else if (deviceType === 'mobile') {
         spawnInstruction.textContent = 'Tap cat to interact';
-        cameraInstruction.textContent = 'Drag to rotate view | Pinch to zoom | Enter VR for hand interaction | C: toggle viewfinder | Space: capture scene';
+        cameraInstruction.textContent = 'Drag to rotate view | Pinch to zoom | Enter VR for hand interaction | C: cycle lens | Space: capture scene';
     } else {
         spawnInstruction.textContent = 'Point controller ray at a cat and pull trigger to interact';
-        cameraInstruction.textContent = 'Left stick: move · Right stick: look · Y button: toggle viewfinder';
+        cameraInstruction.textContent = 'Left stick: move · Right stick: look · Y button: cycle lens';
     }
     
     // Add F1 hint if not already present
@@ -693,7 +823,7 @@ function onKeyDown(event) {
         cameraRadius = Math.min(30, cameraRadius + 1);
         updateCameraPosition();
     } else if (event.code === 'KeyC') {
-        toggleViewfinder();
+        cycleLensMode();
     }
 }
 
@@ -713,6 +843,11 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+
+    if (wideAngleComposer) {
+        wideAngleComposer.setPixelRatio(window.devicePixelRatio);
+        wideAngleComposer.setSize(window.innerWidth, window.innerHeight);
+    }
     
     // Ensure canvas is visible and properly sized
     const canvas = renderer.domElement;
@@ -799,11 +934,11 @@ function handleXRLocomotion(delta) {
             // 1: Grip (side button)
             // 2: X/Y button (Y button on right controller)
             
-            // Toggle viewfinder with Y button (button index 2 on right controller)
+            // Cycle lens presets with Y button (button index 2 on right controller)
             if (source.handedness === 'right' && buttons[2] && buttons[2].pressed) {
                 // Debounce the button press to prevent rapid toggling
                 if (!xrInteractionCooldown.get('viewfinder-toggle')) {
-                    toggleViewfinder();
+                    cycleLensMode();
                     xrInteractionCooldown.set('viewfinder-toggle', true);
                     setTimeout(() => xrInteractionCooldown.delete('viewfinder-toggle'), 300);
                 }
@@ -849,7 +984,29 @@ function renderFrame(time = performance.now()) {
         handleXRHandInteractions();
         
         updateDashboard();
-        renderer.render(scene, camera);
+
+        const lensTransition = Math.min(delta * 6, 1);
+
+        if (Math.abs(currentFov - targetFov) > 0.01) {
+            currentFov += (targetFov - currentFov) * lensTransition;
+            camera.fov = currentFov;
+            camera.updateProjectionMatrix();
+        }
+
+        if (wideAnglePass) {
+            wideAnglePass.uniforms.strength.value += (targetLensStrength - wideAnglePass.uniforms.strength.value) * lensTransition;
+            wideAnglePass.uniforms.k0.value += (targetLensK0 - wideAnglePass.uniforms.k0.value) * lensTransition;
+            wideAnglePass.uniforms.k1.value += (targetLensK1 - wideAnglePass.uniforms.k1.value) * lensTransition;
+            wideAnglePass.uniforms.k2.value += (targetLensK2 - wideAnglePass.uniforms.k2.value) * lensTransition;
+            wideAnglePass.uniforms.vignette.value += (targetLensVignette - wideAnglePass.uniforms.vignette.value) * lensTransition;
+            wideAnglePass.uniforms.zoom.value += (targetLensZoom - wideAnglePass.uniforms.zoom.value) * lensTransition;
+        }
+
+        if (cameraViewfinderActive && wideAngleComposer) {
+            wideAngleComposer.render();
+        } else {
+            renderer.render(scene, camera);
+        }
     } catch (error) {
         console.error('Error in render loop:', error);
         // Display error message on screen
