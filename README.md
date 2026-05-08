@@ -126,6 +126,47 @@ The application features a camera system with:
 - Scene capture functionality with automatic saving
 - VR controller support for toggling viewfinder mode
 
+## Docker Deployment
+
+A production-ready container serves only the compiled bundle via `server.js` (Express, port 3000). TLS is handled externally by your reverse proxy.
+
+### Build & Run
+
+```bash
+# Build image
+docker build -t webxr-kwhd .
+
+# Run (ephemeral captures)
+docker run -p 3000:3000 webxr-kwhd
+
+# Run with persistent captures mounted from host
+docker run -p 3000:3000 \
+  -v ./captures:/app/captures \
+  -e DOWNLOADS_USER=admin \
+  -e DOWNLOADS_PASS=changeme \
+  webxr-kwhd
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `3000` | HTTP listen port |
+| `DOWNLOADS_USER` | `admin` | Basic-auth username for `/downloads` |
+| `DOWNLOADS_PASS` | `changeme` | Basic-auth password for `/downloads` |
+
+See `.env.example` for a ready-to-copy template.
+
+### Captures Volume
+
+The container writes screenshot captures to `/app/captures`. Mount a host directory there to persist files across container restarts:
+
+```bash
+-v /path/on/host/captures:/app/captures
+```
+
+If no volume is mounted, captures are stored inside the container and lost on removal.
+
 ## Future Enhancements
 
 - More complex animations

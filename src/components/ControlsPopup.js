@@ -136,14 +136,22 @@ export class ControlsPopup {
         
         // Controller body
         const bodyGeometry = new THREE.BoxGeometry(0.8, 1.5, 0.2);
-        const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
+        const bodyMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x1a4a1a,
+            transparent: true,
+            opacity: 0.7
+        });
         const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
         body.position.z = -0.1;
         controllerGroup.add(body);
         
         // Handle
         const handleGeometry = new THREE.CylinderGeometry(0.15, 0.15, 0.8, 16);
-        const handleMaterial = new THREE.MeshPhongMaterial({ color: 0x555555 });
+        const handleMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x2a6a2a,
+            transparent: true,
+            opacity: 0.7
+        });
         const handle = new THREE.Mesh(handleGeometry, handleMaterial);
         handle.rotation.x = Math.PI / 2;
         handle.position.y = -0.3;
@@ -152,11 +160,15 @@ export class ControlsPopup {
         
         // Buttons
         const buttonGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.05, 16);
-        const buttonMaterial = new THREE.MeshPhongMaterial({ color: 0xAAAAAA });
+        const buttonMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0xa0c0a0,
+            transparent: true,
+            opacity: 0.8
+        });
         
         // Y Button
         const yButton = new THREE.Mesh(buttonGeometry, buttonMaterial.clone());
-        yButton.material.color.set(0xFFD700); // Gold color for Y button
+        yButton.material.color.set(0x3a8a3a); // Forest accent color for Y button
         yButton.position.set(0.2, 0.3, 0);
         controllerGroup.add(yButton);
         
@@ -176,7 +188,11 @@ export class ControlsPopup {
         
         const stick = new THREE.Mesh(
             new THREE.CylinderGeometry(0.03, 0.03, 0.2, 8),
-            new THREE.MeshPhongMaterial({ color: 0x888888 })
+            new THREE.MeshPhongMaterial({ 
+                color: 0x80a080,
+                transparent: true,
+                opacity: 0.8
+            })
         );
         stick.position.set(-0.2, 0.2, 0);
         controllerGroup.add(stick);
@@ -194,7 +210,7 @@ export class ControlsPopup {
         
         // Rotate the controller slowly
         if (this.scene.children.length > 2) {
-            this.scene.children[2].rotation.y = Math.sin(time * 0.5) * 0.2;
+            this.scene.children[2].rotation.y = Math.sin(time * 0.5) * 0.1;
         }
         
         this.renderer.render(this.scene, this.camera);

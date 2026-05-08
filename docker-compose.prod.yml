@@ -1,0 +1,36 @@
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - webnet
+    depends_on:
+      - webxr-app
+
+  webxr-app:
+    build: .
+    image: webxr-kwhd:latest
+    restart: unless-stopped
+    expose:
+      - "3000"
+    env_file:
+      - .env
+    volumes:
+      - ./captures:/app/captures
+    networks:
+      - webnet
+
+networks:
+  webnet:
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -38,6 +38,25 @@ app.get('/dashboard', (req, res) => {
 
 app.use(express.static('dist'));
 
+app.post('/save-capture', (req, res) => {
+  const { name, dataUrl } = req.body;
+  if (!name || !dataUrl) {
+    return res.status(400).json({ error: 'Missing name or dataUrl' });
+  }
+  const matches = dataUrl.match(/^data:image\/png;base64,(.+)$/);
+  if (!matches) {
+    return res.status(400).json({ error: 'Invalid dataUrl format' });
+  }
+  try {
+    if (!fs.existsSync(CAPTURES_DIR)) fs.mkdirSync(CAPTURES_DIR, { recursive: true });
+    const filename = `${name}.png`;
+    fs.writeFileSync(path.join(CAPTURES_DIR, filename), Buffer.from(matches[1], 'base64'));
+    res.json({ file: filename });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save capture' });
+  }
+});
+
 app.get('/downloads', auth, (req, res) => {
   try {
     const files = fs.readdirSync(CAPTURES_DIR)
@@ -59,7 +78,7 @@ app.get('/downloads/:filename', auth, (req, res) => {
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'File not found' });
   }
-  res.download(filePath);
+  res.sendFile(filePath);
 });
 
 app.delete('/downloads/:filename', auth, (req, res) => {

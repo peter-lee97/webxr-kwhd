@@ -42,3 +42,24 @@ Data flow is one-way from `main.js` to component instances: `main.js` creates oc
 - Input model is intentionally device-specific and set once at init via `detectDevice()` + `setupControls()`; preserve this split when adding controls.
 - Click-to-spawn uses floor raycasting and drag suppression (`hasDragged`) to avoid accidental spawns while rotating camera.
 - Spawns are clamped in `main.js` to scene bounds (`boundarySize` with margin); keep clamping logic in spawn handling, not inside rendering loop.
+
+## Design Context
+
+### Users
+Primary users are people exploring a virtual forest environment with voxel-style Ocelot cats. They're looking for an immersive VR experience where they can interact with the cats and explore the environment.
+
+### Brand Personality
+Immersive, Natural, Playful
+
+### Aesthetic Direction
+The interface should be non-obtrusive and minimal, allowing users to focus entirely on the 3D forest environment and cat interactions. Visual elements should blend naturally with the forest theme without competing for attention.
+
+References: Nature-focused VR experiences, minimalist UI that disappears when not needed
+Anti-references: Cluttered game interfaces, heavy UI overlays that distract from the 3D experience
+
+### Design Principles
+1. **Minimal Interface** - UI elements should be subtle and only appear when needed
+2. **Nature Integration** - All UI should complement the forest environment, not compete with it
+3. **Immersive Priority** - The 3D scene is the primary focus; UI supports but never overshadows it
+4. **Functional Simplicity** - Controls and information should be intuitive and unobtrusive
+5. **Seamless VR Transition** - UI should work equally well in both desktop and VR modes
