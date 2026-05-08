@@ -546,36 +546,197 @@ body.viewfinder-active #audio-controls {
   z-index: 95;
 }
 
-/* Responsive Adjustments */
-@media (max-width: 768px) {
+
+/* ─── Portrait Orientation Warning ─────────────────────────────────────── */
+#portrait-warning {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(8, 28, 8, 0.97);
+  backdrop-filter: blur(8px);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.portrait-warning-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-xl);
+  color: var(--forest-text);
+}
+
+.rotate-icon {
+  width: 64px;
+  height: 64px;
+  fill: var(--forest-highlight);
+  animation: rotate-hint 2s ease-in-out infinite;
+}
+
+.portrait-warning-inner p {
+  font-size: 1rem;
+  color: var(--forest-muted);
+  max-width: 260px;
+  line-height: 1.6;
+}
+
+@keyframes rotate-hint {
+  0%, 100% { transform: rotate(0deg); }
+  40%       { transform: rotate(-90deg); }
+  60%       { transform: rotate(-90deg); }
+}
+
+/* Show on portrait mobile */
+@media (max-width: 900px) and (orientation: portrait) {
+  #portrait-warning { display: flex; }
+}
+
+/* ─── Mobile Controls Overlay ───────────────────────────────────────────── */
+
+/* ── Joystick (left) ── */
+#joystick-zone {
+  display: none;
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  left:   calc(env(safe-area-inset-left,   0px) + 20px);
+  width: 120px;
+  height: 120px;
+  z-index: 200;
+  touch-action: none;
+  user-select: none;
+}
+
+#joystick-base {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(18, 52, 18, 0.45);
+  border: 1px solid rgba(160, 192, 160, 0.3);
+  backdrop-filter: blur(4px);
+}
+
+#joystick-thumb {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(58, 138, 58, 0.7);
+  border: 1px solid rgba(160, 192, 160, 0.6);
+  transition: background var(--transition-fast);
+  pointer-events: none;
+}
+
+#joystick-zone.active #joystick-thumb {
+  background: rgba(80, 180, 80, 0.85);
+}
+
+/* ── Action buttons (right) ── */
+#mob-action-btns {
+  display: none;
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  right:  calc(env(safe-area-inset-right,  0px) + 20px);
+  flex-direction: column;
+  gap: 14px;
+  z-index: 200;
+}
+
+.mob-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(18, 52, 18, 0.82);
+  border: 1px solid rgba(160, 192, 160, 0.45);
+  color: var(--forest-highlight);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background var(--transition-fast), transform var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.mob-btn svg {
+  width: 26px;
+  height: 26px;
+  fill: var(--forest-highlight);
+  pointer-events: none;
+}
+
+.mob-btn:active {
+  background: rgba(42, 106, 42, 0.7);
+  transform: scale(0.91);
+}
+
+.mob-btn.active {
+  background: rgba(58, 138, 58, 0.55);
+  border-color: var(--forest-highlight);
+}
+
+/* ─── Responsive Adjustments ────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  /* Hide dashboard on mobile — screen real estate goes to the scene */
+  #dashboard { display: none !important; }
+
+  /* Show mobile joystick + action buttons */
+  #joystick-zone   { display: block; }
+  #mob-action-btns { display: flex; }
+
+  /* Compact info panel */
   #info {
-    max-width: 200px;
+    max-width: 180px;
+    padding: var(--spacing-xs) var(--spacing-sm);
   }
-  
-  #dashboard {
-    min-width: 150px;
+
+  #info h1 { font-size: 0.95rem; }
+  #info p  { font-size: 0.75rem; }
+
+  /* Shrink audio controls so they don't crowd thumb area */
+  #audio-controls {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+    left: 16px;
+    padding: 4px 8px;
   }
-  
-  .dashboard-item {
-    gap: var(--spacing-xs);
+
+  #audio-status { display: none; }
+
+  /* controls ? button: already hidden by default, shown by JS */
+  #controls-toggle {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 80px);
+    right: 16px;
   }
-  
-  .dashboard-label {
-    min-width: 50px;
-    font-size: 0.7rem;
-  }
-  
-  .dashboard-value {
-    font-size: 0.75rem;
-  }
-  
+
   .control-key {
     min-width: 60px;
     padding: var(--spacing-xxs) var(--spacing-xs);
     font-size: 0.7rem;
   }
-  
-  .control-desc {
-    font-size: 0.8rem;
+
+  .control-desc { font-size: 0.8rem; }
+}
+
+/* Landscape phone — pull info panel to safe inset */
+@media (max-width: 900px) and (orientation: landscape) {
+  #info {
+    top: env(safe-area-inset-top, var(--spacing-md));
+    left: calc(env(safe-area-inset-left, 0px) + var(--spacing-md));
+  }
+
+  #joystick-zone {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+    left:   calc(env(safe-area-inset-left,   0px) + 16px);
+  }
+
+  #mob-action-btns {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+    right:  calc(env(safe-area-inset-right,  0px) + 16px);
   }
 }

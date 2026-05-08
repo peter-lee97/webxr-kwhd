@@ -53,6 +53,9 @@ let audioState = {
 
 // Camera capture state variables
 let cameraViewfinderActive = false;
+
+// Mobile joystick state
+const joystickState = { active: false, dx: 0, dy: 0 };
 let captureCounter = 0; // For incremental folder naming
 const viewfinderOverlay = document.getElementById('viewfinder-overlay');
 const captureFlash = document.getElementById('capture-flash');
@@ -125,10 +128,14 @@ async function init() {
     // Initialize controls popup
     controlsPopup = new ControlsPopup();
     
-    // Show controls button for desktop devices
-    if (deviceType === 'desktop') {
-        const controlsToggle = document.getElementById('controls-toggle');
-        controlsToggle.classList.add('visible');
+    // Show controls button for all devices
+    const controlsToggle = document.getElementById('controls-toggle');
+    controlsToggle.classList.add('visible');
+    
+    // Mobile-specific setup
+    if (deviceType === 'mobile') {
+        setupMobileControls();
+        setupOrientationHandler();
     }
     
     // Initialize scene first
@@ -377,14 +384,14 @@ function updateControlInstructions() {
         cameraInstruction.textContent = 'Drag to rotate view | Scroll to zoom | Enter VR for hand interaction | C: toggle viewfinder | Space: capture scene';
     } else if (deviceType === 'mobile') {
         spawnInstruction.textContent = 'Tap cat to interact';
-        cameraInstruction.textContent = 'Drag to rotate view | Pinch to zoom | Enter VR for hand interaction | C: toggle viewfinder | Space: capture scene';
+        cameraInstruction.textContent = 'Drag to rotate · Pinch to zoom';
     } else {
         spawnInstruction.textContent = 'Point controller ray at a cat and pull trigger to interact';
         cameraInstruction.textContent = 'Left stick: move · Right stick: look · Y button: toggle viewfinder';
     }
     
-    // Add F1 hint if not already present
-    if (infoElement && !document.getElementById('f1-hint')) {
+    // Add F1 hint on desktop only
+    if (infoElement && !document.getElementById('f1-hint') && deviceType !== 'mobile') {
         const f1Hint = document.createElement('p');
         f1Hint.id = 'f1-hint';
         f1Hint.textContent = 'Press F1 for controls guide';
@@ -487,6 +494,7 @@ function onMouseWheel(event) {
 function onTouchStart(event) {
     if (event.touches.length === 1) {
         isDragging = true;
+        hasDragged = false;
         previousMousePosition = { x: event.touches[0].clientX, y: event.touches[0].clientY };
     }
 }
@@ -497,6 +505,10 @@ function onTouchMove(event) {
     
     const deltaX = event.touches[0].clientX - previousMousePosition.x;
     const deltaY = event.touches[0].clientY - previousMousePosition.y;
+
+    if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+        hasDragged = true;
+    }
     
     cameraAngle += deltaX * 0.01;
     cameraHeight = Math.max(3, Math.min(20, cameraHeight - deltaY * 0.05));
@@ -506,8 +518,127 @@ function onTouchMove(event) {
     previousMousePosition = { x: event.touches[0].clientX, y: event.touches[0].clientY };
 }
 
-function onTouchEnd() {
+function onTouchEnd(event) {
     isDragging = false;
+    // If the finger didn't move (tap), raycast directly — don't rely on
+    // synthetic click which may be suppressed by event.preventDefault() in touchmove.
+    if (!hasDragged && event.changedTouches.length === 1) {
+        const t = event.changedTouches[0];
+        handleMobileTap(t.clientX, t.clientY);
+    }
+    hasDragged = false;
+}
+
+function handleMobileTap(clientX, clientY) {
+    // Ignore taps on UI elements overlaid on the canvas
+    const el = document.elementFromPoint(clientX, clientY);
+    if (el !== renderer.domElement) return;
+
+    mouse.x =  (clientX / window.innerWidth)  * 2 - 1;
+    mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+
+    const hits = raycaster.intersectObjects(ocelotMeshes, false);
+    if (hits.length > 0) {
+        const ocelot = ocelotMeshToEntity.get(hits[0].object);
+        if (ocelot) triggerOcelotInteraction(ocelot, 'cursor');
+    }
+}
+
+function setupMobileControls() {
+    // ── Right action buttons ──────────────────────────────────────────────
+    const mobViewfinder = document.getElementById('mob-viewfinder');
+    const mobCapture    = document.getElementById('mob-capture');
+
+    // Use touchend for reliable mobile activation; stopPropagation prevents
+    // the document-level drag handler from treating the button tap as a drag.
+    mobViewfinder.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleViewfinder();
+        mobViewfinder.classList.toggle('active', cameraViewfinderActive);
+        // Update HUD hint for mobile context
+        const hint = document.getElementById('vf-hud-hint');
+        if (hint) hint.textContent = '📷 capture  |  👁 exit';
+    }, { passive: false });
+
+    mobCapture.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        captureScene();
+    }, { passive: false });
+
+    // ── Left virtual joystick ─────────────────────────────────────────────
+    const zone  = document.getElementById('joystick-zone');
+    const thumb = document.getElementById('joystick-thumb');
+    const RADIUS = 38; // max displacement from center (px)
+    let joystickTouchId = null;
+    let baseX = 0, baseY = 0;
+
+    zone.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (joystickTouchId !== null) return; // already tracking one finger
+        const t = e.changedTouches[0];
+        joystickTouchId = t.identifier;
+        const rect = zone.getBoundingClientRect();
+        baseX = rect.left + rect.width  / 2;
+        baseY = rect.top  + rect.height / 2;
+        joystickState.active = true;
+        zone.classList.add('active');
+    }, { passive: false });
+
+    zone.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        let t = null;
+        for (const touch of e.changedTouches) {
+            if (touch.identifier === joystickTouchId) { t = touch; break; }
+        }
+        if (!t) return;
+
+        let dx = t.clientX - baseX;
+        let dy = t.clientY - baseY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > RADIUS) { dx = dx / dist * RADIUS; dy = dy / dist * RADIUS; }
+
+        // Move the thumb visually
+        thumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
+        // Normalise to [-1, 1]
+        joystickState.dx = dx / RADIUS;
+        joystickState.dy = dy / RADIUS;
+    }, { passive: false });
+
+    const endJoystick = (e) => {
+        e.preventDefault();
+        let found = false;
+        for (const touch of e.changedTouches) {
+            if (touch.identifier === joystickTouchId) { found = true; break; }
+        }
+        if (!found) return;
+        joystickTouchId = null;
+        joystickState.active = false;
+        joystickState.dx = 0;
+        joystickState.dy = 0;
+        thumb.style.transform = 'translate(-50%, -50%)';
+        zone.classList.remove('active');
+    };
+
+    zone.addEventListener('touchend',    endJoystick, { passive: false });
+    zone.addEventListener('touchcancel', endJoystick, { passive: false });
+}
+
+function setupOrientationHandler() {
+    const warning = document.getElementById('portrait-warning');
+    const check = () => {
+        const portrait = window.matchMedia('(orientation: portrait)').matches;
+        warning.style.display = portrait ? 'flex' : 'none';
+    };
+    check();
+    window.addEventListener('orientationchange', check);
+    window.matchMedia('(orientation: portrait)').addEventListener('change', check);
 }
 
 function spawnOcelot(x, z) {
@@ -847,6 +978,15 @@ function renderFrame(time = performance.now()) {
         
         handleXRLocomotion(delta);
         handleXRHandInteractions();
+
+        // Apply mobile joystick input to orbit camera
+        if (joystickState.active) {
+            const ORBIT_SPEED  = 1.2; // radians/s
+            const ZOOM_SPEED   = 8;   // units/s
+            cameraAngle  += joystickState.dx * ORBIT_SPEED * delta;
+            cameraRadius  = Math.max(5, Math.min(30, cameraRadius + joystickState.dy * ZOOM_SPEED * delta));
+            updateCameraPosition();
+        }
         
         updateDashboard();
         renderer.render(scene, camera);

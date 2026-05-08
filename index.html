@@ -2,12 +2,46 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Forest Ocelot VR Experience</title>
     <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
     <!-- Viewfinder overlay: camera-lens style -->
+    <!-- Portrait orientation warning (mobile only) -->
+    <div id="portrait-warning">
+        <div class="portrait-warning-inner">
+            <svg class="rotate-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 20.29 1.1 16 .07l.48 2.45zM21.48 13c-.36 3.77-2.7 6.93-5.97 8.48l-.48 2.45c4.29-1.03 7.44-4.77 7.95-10.93h-1.5zM3.52 21.48C.25 19.93-2.09 16.77-2.45 13H-4c.51 6.16 3.66 9.9 7.95 10.93l-.43-2.45zM7.52 2.52L7.04.07C2.75 1.1-.4 4.84-.91 11H.59c.36-3.76 2.7-6.93 5.97-8.48l.96 2.45zM16 1L12 5 8 1H5v2l7 7 7-7V1h-3z"/>
+            </svg>
+            <svg class="rotate-icon" viewBox="0 0 24 24" aria-hidden="true" style="width:48px;height:48px">
+                <path d="M7.5 21H2V9h5.5v12zm7.25-18h-5.5v18h5.5V3zM22 11h-5.5v10H22V11z" opacity=".3"/>
+                <path d="M20 8V5h-2v3h-3l4 4 4-4h-3zM4 16v3h2v-3h3l-4-4-4 4h3z"/>
+            </svg>
+            <p>Rotate your device to landscape for the best experience</p>
+        </div>
+    </div>
+
+    <!-- Mobile touch controls overlay -->
+    <!-- Left: virtual joystick for camera navigation -->
+    <div id="joystick-zone" aria-hidden="true">
+        <div id="joystick-base">
+            <div id="joystick-thumb"></div>
+        </div>
+    </div>
+    <!-- Right: action buttons -->
+    <div id="mob-action-btns">
+        <button id="mob-viewfinder" class="mob-btn" aria-label="Toggle viewfinder">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3,3H9V5H5V9H3V3M21,3V9H19V5H15V3H21M3,21V15H5V19H9V21H3M21,21H15V19H19V15H21V21M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8M12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14A2,2 0 0,0 14,12A2,2 0 0,0 12,10Z"/></svg>
+        </button>
+        <button id="mob-capture" class="mob-btn" aria-label="Capture scene">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2A3.2 3.2 0 0 1 8.8 12 3.2 3.2 0 0 1 12 8.8 3.2 3.2 0 0 1 15.2 12 3.2 3.2 0 0 1 12 15.2M12 7A5 5 0 0 0 7 12 5 5 0 0 0 12 17 5 5 0 0 0 17 12 5 5 0 0 0 12 7M20 4H16.83L15 2H9L7.17 4H4A2 2 0 0 0 2 6V18A2 2 0 0 0 4 20H20A2 2 0 0 0 22 18V6A2 2 0 0 0 20 4Z"/></svg>
+        </button>
+    </div>
+
     <div id="viewfinder-overlay">
         <!-- Rule-of-thirds grid -->
         <div class="vf-grid">
@@ -34,7 +68,7 @@
         <div class="vf-hud">
             <span class="vf-hud-icon">⬤</span>
             <span class="vf-hud-count" id="vf-capture-count">000</span>
-            <span class="vf-hud-hint">SPACE · capture &nbsp;|&nbsp; C · exit</span>
+            <span class="vf-hud-hint" id="vf-hud-hint">SPACE · capture &nbsp;|&nbsp; C · exit</span>
         </div>
     </div>
     
