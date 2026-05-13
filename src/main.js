@@ -53,6 +53,7 @@ let audioState = {
 
 // Camera capture state variables
 let cameraViewfinderActive = false;
+let mobileQuickPanelOpen = false;
 
 // Mobile joystick state
 const joystickState = { active: false, dx: 0, dy: 0 };
@@ -64,6 +65,65 @@ function toggleViewfinder() {
     cameraViewfinderActive = !cameraViewfinderActive;
     viewfinderOverlay.style.display = cameraViewfinderActive ? 'block' : 'none';
     document.body.classList.toggle('viewfinder-active', cameraViewfinderActive);
+    if (deviceType === 'mobile' && cameraViewfinderActive) {
+        setMobileQuickPanelOpen(false);
+    }
+    syncMobileHud();
+}
+
+function updateViewfinderHudHint() {
+    const hint = document.getElementById('vf-hud-hint');
+    if (!hint) return;
+
+    hint.textContent = deviceType === 'mobile'
+        ? 'Camera button · capture  |  Eye button · exit'
+        : 'SPACE · capture  |  C · exit';
+}
+
+function setMobileQuickPanelOpen(isOpen) {
+    mobileQuickPanelOpen = Boolean(isOpen);
+
+    const panel = document.getElementById('mobile-quick-panel');
+    const toggle = document.getElementById('mob-panel-toggle');
+
+    if (panel) {
+        panel.classList.toggle('open', mobileQuickPanelOpen);
+        panel.setAttribute('aria-hidden', String(!mobileQuickPanelOpen));
+    }
+
+    if (toggle) {
+        toggle.classList.toggle('active', mobileQuickPanelOpen);
+        toggle.setAttribute('aria-expanded', String(mobileQuickPanelOpen));
+    }
+
+    document.body.classList.toggle('mobile-panel-open', mobileQuickPanelOpen);
+}
+
+function syncMobileHud() {
+    const viewfinderButton = document.getElementById('mob-viewfinder');
+    const captureButton = document.getElementById('mob-capture');
+
+    if (viewfinderButton) {
+        viewfinderButton.classList.toggle('active', cameraViewfinderActive);
+    }
+
+    if (captureButton) {
+        const shouldShowCapture = deviceType === 'mobile' && cameraViewfinderActive;
+        captureButton.hidden = !shouldShowCapture;
+        captureButton.setAttribute('aria-hidden', String(!shouldShowCapture));
+    }
+
+    updateViewfinderHudHint();
+}
+
+function syncMobilePanel() {
+    const mobileAudioLabel = document.getElementById('mobile-audio-label');
+
+    if (mobileAudioLabel) {
+        mobileAudioLabel.textContent = audioState.isMuted
+            ? 'Muted'
+            : audioState.status;
+    }
 }
 
 async function captureScene() {
@@ -126,7 +186,7 @@ async function init() {
     console.log('Device type detected:', deviceType);
     
     // Initialize controls popup
-    controlsPopup = new ControlsPopup();
+    controlsPopup = new ControlsPopup(deviceType);
     
     // Show controls button for all devices
     const controlsToggle = document.getElementById('controls-toggle');
@@ -167,6 +227,7 @@ async function init() {
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.shadowMap.enabled = true;
         renderer.xr.enabled = true;
+        renderer.domElement.classList.add('scene-canvas');
         
         container.appendChild(renderer.domElement);
         console.log('Renderer created successfully');
@@ -259,6 +320,7 @@ async function init() {
     try {
         audioManager = new AudioManager(state => {
             audioState = state;
+            syncMobilePanel();
         });
         audioManager.attachControls({
             toggleButton: document.getElementById('audio-toggle'),
@@ -301,6 +363,8 @@ async function init() {
     
     updateControlInstructions();
     updateDashboard();
+    syncMobileHud();
+    syncMobilePanel();
     startStandardRenderLoop();
     
     renderer.xr.addEventListener('sessionstart', () => {
@@ -400,6 +464,19 @@ function updateControlInstructions() {
         f1Hint.style.marginTop = '4px';
         infoElement.appendChild(f1Hint);
     }
+
+    const mobileSpawnInstruction = document.getElementById('mobile-spawn-instruction');
+    const mobileCameraInstruction = document.getElementById('mobile-camera-instruction');
+
+    if (mobileSpawnInstruction) {
+        mobileSpawnInstruction.textContent = spawnInstruction.textContent;
+    }
+
+    if (mobileCameraInstruction) {
+        mobileCameraInstruction.textContent = cameraInstruction.textContent;
+    }
+
+    updateViewfinderHudHint();
 }
 
 function setupXRInteraction() {
@@ -547,30 +624,63 @@ function handleMobileTap(clientX, clientY) {
 }
 
 function setupMobileControls() {
-    // ── Right action buttons ──────────────────────────────────────────────
     const mobViewfinder = document.getElementById('mob-viewfinder');
-    const mobCapture    = document.getElementById('mob-capture');
+    const mobCapture = document.getElementById('mob-capture');
+    const mobPanelToggle = document.getElementById('mob-panel-toggle');
+    const mobileQuickPanel = document.getElementById('mobile-quick-panel');
+    const mobilePanelShell = mobileQuickPanel?.querySelector('.mobile-panel-shell');
+    const mobilePanelClose = document.getElementById('mobile-panel-close');
+    const mobileAudioToggle = document.getElementById('mobile-audio-toggle');
+    const mobileControlsGuide = document.getElementById('mobile-controls-guide');
+    const audioToggle = document.getElementById('audio-toggle');
 
-    // Use touchend for reliable mobile activation; stopPropagation prevents
-    // the document-level drag handler from treating the button tap as a drag.
-    mobViewfinder.addEventListener('touchend', (e) => {
+    mobViewfinder.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         toggleViewfinder();
-        mobViewfinder.classList.toggle('active', cameraViewfinderActive);
-        // Update HUD hint for mobile context
-        const hint = document.getElementById('vf-hud-hint');
-        if (hint) hint.textContent = '📷 capture  |  👁 exit';
-    }, { passive: false });
+    });
 
-    mobCapture.addEventListener('touchend', (e) => {
+    mobCapture.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (!cameraViewfinderActive) return;
         captureScene();
-    }, { passive: false });
+    });
 
-    // ── Left virtual joystick ─────────────────────────────────────────────
-    const zone  = document.getElementById('joystick-zone');
+    mobPanelToggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMobileQuickPanelOpen(!mobileQuickPanelOpen);
+    });
+
+    mobilePanelClose.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMobileQuickPanelOpen(false);
+    });
+
+    mobileAudioToggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        audioToggle?.click();
+    });
+
+    mobileControlsGuide.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMobileQuickPanelOpen(false);
+        controlsPopup?.show();
+    });
+
+    mobileQuickPanel?.addEventListener('click', () => {
+        setMobileQuickPanelOpen(false);
+    });
+
+    mobilePanelShell?.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+
+    const zone = document.getElementById('joystick-zone');
     const thumb = document.getElementById('joystick-thumb');
     const RADIUS = 38; // max displacement from center (px)
     let joystickTouchId = null;
@@ -628,6 +738,9 @@ function setupMobileControls() {
 
     zone.addEventListener('touchend',    endJoystick, { passive: false });
     zone.addEventListener('touchcancel', endJoystick, { passive: false });
+
+    syncMobileHud();
+    syncMobilePanel();
 }
 
 function setupOrientationHandler() {
@@ -698,6 +811,11 @@ function updateDashboard() {
     if (catCount) {
         catCount.textContent = ocelots.length;
     }
+
+    const mobileCatCount = document.getElementById('mobile-cat-count');
+    if (mobileCatCount) {
+        mobileCatCount.textContent = String(ocelots.length);
+    }
     
     if (actionSummary) {
         const actionCounts = {};
@@ -713,6 +831,11 @@ function updateDashboard() {
     
     if (interactionStatus) {
         interactionStatus.textContent = lastInteractionLabel;
+    }
+
+    const mobileInteractionStatus = document.getElementById('mobile-interaction-status');
+    if (mobileInteractionStatus) {
+        mobileInteractionStatus.textContent = lastInteractionLabel;
     }
     
     if (audioTrack) {
@@ -739,6 +862,8 @@ function updateDashboard() {
             rendererName.textContent = 'Initializing...';
         }
     }
+
+    syncMobilePanel();
 }
 
 function onMouseClick(event) {
@@ -825,6 +950,8 @@ function onKeyDown(event) {
         updateCameraPosition();
     } else if (event.code === 'KeyC') {
         toggleViewfinder();
+    } else if (event.code === 'Escape' && mobileQuickPanelOpen) {
+        setMobileQuickPanelOpen(false);
     }
 }
 

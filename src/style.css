@@ -59,11 +59,21 @@ body {
   color: var(--forest-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  position: relative;
+  min-height: 100vh;
 }
 
 /* Canvas */
 canvas {
   display: block;
+}
+
+.scene-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
 }
 
 /* Info Panel */
@@ -664,6 +674,10 @@ body.viewfinder-active #audio-controls {
   touch-action: manipulation;
 }
 
+.mob-btn[hidden] {
+  display: none !important;
+}
+
 .mob-btn svg {
   width: 26px;
   height: 26px;
@@ -681,38 +695,174 @@ body.viewfinder-active #audio-controls {
   border-color: var(--forest-highlight);
 }
 
+.mob-btn-secondary {
+  background: rgba(11, 31, 11, 0.74);
+}
+
+.mob-btn:focus-visible,
+.mobile-panel-close:focus-visible,
+.mobile-panel-action:focus-visible {
+  outline: 2px solid var(--forest-highlight);
+  outline-offset: 3px;
+}
+
+#mobile-quick-panel {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  background: rgba(6, 16, 6, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-normal);
+}
+
+#mobile-quick-panel.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mobile-panel-shell {
+  position: absolute;
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  width: min(320px, calc(100vw - 32px));
+  display: grid;
+  gap: var(--spacing-md);
+  padding: clamp(1rem, 2vw, 1.25rem);
+  border-radius: 20px;
+  border: 1px solid rgba(160, 192, 160, 0.24);
+  background: linear-gradient(180deg, rgba(18, 52, 18, 0.96), rgba(8, 28, 8, 0.96));
+  backdrop-filter: blur(12px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  transform: translateY(12px) scale(0.98);
+  transition: transform var(--transition-normal);
+}
+
+#mobile-quick-panel.open .mobile-panel-shell {
+  transform: translateY(0) scale(1);
+}
+
+.mobile-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.mobile-panel-eyebrow,
+.mobile-panel-kicker,
+.mobile-panel-label {
+  color: var(--forest-highlight);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+}
+
+.mobile-panel-header h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--forest-text);
+}
+
+.mobile-panel-close {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid rgba(160, 192, 160, 0.24);
+  background: rgba(26, 74, 26, 0.6);
+  color: var(--forest-highlight);
+  font-size: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-panel-body {
+  display: grid;
+  gap: var(--spacing-md);
+}
+
+.mobile-panel-section {
+  display: grid;
+  gap: var(--spacing-sm);
+}
+
+.mobile-panel-copy {
+  color: var(--forest-text);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.mobile-panel-copy-muted {
+  color: var(--forest-muted);
+}
+
+.mobile-panel-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.mobile-panel-metric {
+  display: grid;
+  gap: var(--spacing-xs);
+  padding: 0.875rem;
+  border-radius: 14px;
+  background: rgba(26, 74, 26, 0.34);
+  border: 1px solid rgba(160, 192, 160, 0.14);
+}
+
+.mobile-panel-value {
+  color: var(--forest-text);
+  font-size: 0.92rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.mobile-panel-actions {
+  gap: 0.75rem;
+}
+
+.mobile-panel-action {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  padding: 0.85rem 0.95rem;
+  border-radius: 14px;
+  border: 1px solid rgba(160, 192, 160, 0.16);
+  background: rgba(11, 31, 11, 0.64);
+  color: var(--forest-text);
+  text-align: left;
+}
+
+.mobile-panel-action-label {
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.mobile-panel-action-meta {
+  font-size: 0.78rem;
+  color: var(--forest-muted);
+}
+
 /* ─── Responsive Adjustments ────────────────────────────────────────────── */
 @media (max-width: 900px) {
-  /* Hide dashboard on mobile — screen real estate goes to the scene */
+  /* Hide persistent overlays on mobile; utilities move into the secondary panel */
+  #info,
+  #dashboard,
+  #audio-controls,
+  #controls-toggle {
+    display: none !important;
+  }
+
   #dashboard { display: none !important; }
 
-  /* Show mobile joystick + action buttons */
-  #joystick-zone   { display: block; }
+  #joystick-zone { display: block; }
   #mob-action-btns { display: flex; }
-
-  /* Compact info panel */
-  #info {
-    max-width: 180px;
-    padding: var(--spacing-xs) var(--spacing-sm);
-  }
-
-  #info h1 { font-size: 0.95rem; }
-  #info p  { font-size: 0.75rem; }
-
-  /* Shrink audio controls so they don't crowd thumb area */
-  #audio-controls {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
-    left: 16px;
-    padding: 4px 8px;
-  }
-
-  #audio-status { display: none; }
-
-  /* controls ? button: already hidden by default, shown by JS */
-  #controls-toggle {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 80px);
-    right: 16px;
-  }
+  #mobile-quick-panel { display: block; }
 
   .control-key {
     min-width: 60px;
@@ -738,5 +888,10 @@ body.viewfinder-active #audio-controls {
   #mob-action-btns {
     bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
     right:  calc(env(safe-area-inset-right,  0px) + 16px);
+  }
+
+  .mobile-panel-shell {
+    right: calc(env(safe-area-inset-right, 0px) + 16px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
   }
 }

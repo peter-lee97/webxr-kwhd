@@ -37,9 +37,50 @@
         <button id="mob-viewfinder" class="mob-btn" aria-label="Toggle viewfinder">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3,3H9V5H5V9H3V3M21,3V9H19V5H15V3H21M3,21V15H5V19H9V21H3M21,21H15V19H19V15H21V21M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8M12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14A2,2 0 0,0 14,12A2,2 0 0,0 12,10Z"/></svg>
         </button>
-        <button id="mob-capture" class="mob-btn" aria-label="Capture scene">
+        <button id="mob-capture" class="mob-btn" aria-label="Capture scene" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2A3.2 3.2 0 0 1 8.8 12 3.2 3.2 0 0 1 12 8.8 3.2 3.2 0 0 1 15.2 12 3.2 3.2 0 0 1 12 15.2M12 7A5 5 0 0 0 7 12 5 5 0 0 0 12 17 5 5 0 0 0 17 12 5 5 0 0 0 12 7M20 4H16.83L15 2H9L7.17 4H4A2 2 0 0 0 2 6V18A2 2 0 0 0 4 20H20A2 2 0 0 0 22 18V6A2 2 0 0 0 20 4Z"/></svg>
         </button>
+        <button id="mob-panel-toggle" class="mob-btn mob-btn-secondary" aria-label="Open mobile controls panel" aria-controls="mobile-quick-panel" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v2H4V7zm3 4h13v2H7v-2zm-3 4h16v2H4v-2z"/></svg>
+        </button>
+    </div>
+    <div id="mobile-quick-panel" aria-hidden="true">
+        <div class="mobile-panel-shell">
+            <div class="mobile-panel-header">
+                <div>
+                    <p class="mobile-panel-eyebrow">Field guide</p>
+                    <h2>Keep the forest clear</h2>
+                </div>
+                <button id="mobile-panel-close" class="mobile-panel-close" type="button" aria-label="Close mobile controls panel">×</button>
+            </div>
+            <div class="mobile-panel-body">
+                <section class="mobile-panel-section">
+                    <p class="mobile-panel-kicker">Primary actions</p>
+                    <p id="mobile-spawn-instruction" class="mobile-panel-copy">Tap cat to interact</p>
+                    <p id="mobile-camera-instruction" class="mobile-panel-copy mobile-panel-copy-muted">Drag to rotate · Pinch to zoom</p>
+                </section>
+                <section class="mobile-panel-section mobile-panel-metrics" aria-label="Current forest status">
+                    <div class="mobile-panel-metric">
+                        <span class="mobile-panel-label">Cats</span>
+                        <span id="mobile-cat-count" class="mobile-panel-value">0</span>
+                    </div>
+                    <div class="mobile-panel-metric">
+                        <span class="mobile-panel-label">Last interaction</span>
+                        <span id="mobile-interaction-status" class="mobile-panel-value">none</span>
+                    </div>
+                </section>
+                <section class="mobile-panel-section mobile-panel-actions">
+                    <button id="mobile-audio-toggle" class="mobile-panel-action" type="button">
+                        <span class="mobile-panel-action-label">Sound</span>
+                        <span id="mobile-audio-label" class="mobile-panel-action-meta">Ready</span>
+                    </button>
+                    <button id="mobile-controls-guide" class="mobile-panel-action" type="button">
+                        <span class="mobile-panel-action-label">Controls guide</span>
+                        <span class="mobile-panel-action-meta">Open reference</span>
+                    </button>
+                </section>
+            </div>
+        </div>
     </div>
 
     <div id="viewfinder-overlay">

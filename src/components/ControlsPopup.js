@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 
 export class ControlsPopup {
-    constructor() {
+    constructor(deviceType = 'desktop') {
+        this.deviceType = deviceType;
         this.isOpen = false;
         this.element = null;
         this.scene = null;
@@ -49,6 +50,29 @@ export class ControlsPopup {
                         <div class="control-desc">Zoom camera</div>
                     </div>
                 </div>
+                <div class="controls-section" id="mobile-controls">
+                    <h3>Mobile Controls</h3>
+                    <div class="control-item">
+                        <div class="control-key">Tap cat</div>
+                        <div class="control-desc">Interact with cats</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">Joystick</div>
+                        <div class="control-desc">Orbit and zoom the camera</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">Eye</div>
+                        <div class="control-desc">Enter or leave viewfinder mode</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">Camera</div>
+                        <div class="control-desc">Capture while viewfinder is active</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">Menu</div>
+                        <div class="control-desc">Open the mobile field guide and utility controls</div>
+                    </div>
+                </div>
                 <div class="controls-section" id="vr-controls">
                     <h3>VR Controls</h3>
                     <div class="control-item">
@@ -73,6 +97,7 @@ export class ControlsPopup {
         `;
         
         document.body.appendChild(this.element);
+        this.syncDeviceSections();
         
         // Add event listeners
         document.getElementById('close-controls').addEventListener('click', () => {
@@ -87,8 +112,31 @@ export class ControlsPopup {
             }
         });
         
-        // Initialize Three.js scene for visual controls
-        this.initVisualControls();
+        // Initialize Three.js scene for visual controls only on non-mobile layouts
+        if (this.deviceType !== 'mobile') {
+            this.initVisualControls();
+        }
+    }
+
+    setDeviceType(deviceType) {
+        this.deviceType = deviceType;
+        this.syncDeviceSections();
+    }
+
+    syncDeviceSections() {
+        if (!this.element) return;
+
+        const desktopSection = this.element.querySelector('#desktop-controls');
+        const mobileSection = this.element.querySelector('#mobile-controls');
+        const vrSection = this.element.querySelector('#vr-controls');
+        const visual = this.element.querySelector('#controls-visual');
+
+        const isMobile = this.deviceType === 'mobile';
+
+        if (desktopSection) desktopSection.hidden = isMobile;
+        if (vrSection) vrSection.hidden = isMobile;
+        if (mobileSection) mobileSection.hidden = !isMobile;
+        if (visual) visual.hidden = isMobile;
     }
     
     initVisualControls() {
