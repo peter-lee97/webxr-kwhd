@@ -2,11 +2,65 @@ import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
 import { XRHandModelFactory } from 'three/examples/jsm/webxr/XRHandModelFactory.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { createOcelot } from './components/VoxelOcelot.js';
 import { createButterfly } from './components/VoxelButterfly.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Environment } from './components/Environment.js';
 import { ControlsPopup } from './components/ControlsPopup.js';
+
+// Barrel distortion shader simulating a wide-angle (28mm) lens
+const BarrelDistortionShader = {
+    uniforms: {
+        tDiffuse: { value: null },
+        k0: { value: 0.0 },
+        k1: { value: 0.24 },
+        k2: { value: 0.06 },
+        vignette: { value: 0.0 },
+        zoom: { value: 1.0 },
+        strength: { value: 0.0 },
+    },
+    vertexShader: /* glsl */`
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    `,
+    fragmentShader: /* glsl */`
+        uniform sampler2D tDiffuse;
+        uniform float k0;
+        uniform float k1;
+        uniform float k2;
+        uniform float vignette;
+        uniform float zoom;
+        uniform float strength;
+        varying vec2 vUv;
+
+        vec2 distort(vec2 uv) {
+            vec2 p = (uv - 0.5) * zoom;
+            float r = length(p);
+            float r2 = dot(p, p);
+            float barrel = 1.0 + strength * (k0 * r + k1 * r2 + k2 * r2 * r2);
+            return p * barrel + 0.5;
+        }
+
+        void main() {
+            vec2 distortedUv = mix(vUv, distort(vUv), strength);
+            vec2 finalUv = clamp(distortedUv, vec2(0.001), vec2(0.999));
+            vec4 color = texture2D(tDiffuse, finalUv);
+
+            vec2 vignetteUv = (vUv - 0.5) * 1.6;
+            float vignetteMask = smoothstep(0.10, 0.85, dot(vignetteUv, vignetteUv));
+            color.rgb *= 1.0 - (vignette * vignetteMask);
+
+            gl_FragColor = color;
+        }
+    `
+};
 
 let scene, camera, renderer, cameraRig;
 let ocelots = [];
@@ -60,15 +114,70 @@ const joystickState = { active: false, dx: 0, dy: 0 };
 let captureCounter = 0; // For incremental folder naming
 const viewfinderOverlay = document.getElementById('viewfinder-overlay');
 const captureFlash = document.getElementById('capture-flash');
+const lensLabel = document.getElementById('vf-lens-label');
 
-function toggleViewfinder() {
-    cameraViewfinderActive = !cameraViewfinderActive;
+// Lens effect state
+const DEFAULT_FOV = 75; // baseline scene camera when viewfinder is off
+const LENS_PRESETS = [
+    { label: '150MM', fov: 30, strength: 0.0, k0: 0.0, k1: 0.0, k2: 0.0, zoom: 1.0, vignette: 0.0 },
+    { label: '50MM', fov: 75, strength: 0.0, k0: 0.0, k1: 0.0, k2: 0.0, zoom: 1.0, vignette: 0.0 },
+    { label: '24MM', fov: 98, strength: 1.0, k0: 0.02, k1: 0.24, k2: 0.06, zoom: 0.85, vignette: 0.08 },
+    { label: '18MM', fov: 112, strength: 1.4, k0: 0.24, k1: 0.48, k2: 0.18, zoom: 0.67, vignette: 0.26 }
+];
+let activeLensIndex = -1;
+let targetFov = DEFAULT_FOV;
+let currentFov = DEFAULT_FOV;
+let targetLensStrength = 0.0;
+let targetLensK0 = 0.0;
+let targetLensK1 = 0.0;
+let targetLensK2 = 0.0;
+let targetLensZoom = 1.0;
+let targetLensVignette = 0.0;
+let wideAngleComposer = null;
+let wideAnglePass = null;
+
+function applyLensPreset(index) {
+    activeLensIndex = index;
+    cameraViewfinderActive = index >= 0;
     viewfinderOverlay.style.display = cameraViewfinderActive ? 'block' : 'none';
     document.body.classList.toggle('viewfinder-active', cameraViewfinderActive);
     if (deviceType === 'mobile' && cameraViewfinderActive) {
         setMobileQuickPanelOpen(false);
     }
+
+    if (!cameraViewfinderActive) {
+        targetFov = DEFAULT_FOV;
+        targetLensStrength = 0.0;
+        targetLensK0 = 0.0;
+        targetLensK1 = 0.0;
+        targetLensK2 = 0.0;
+        targetLensZoom = 1.0;
+        targetLensVignette = 0.0;
+        if (lensLabel) lensLabel.textContent = 'OFF';
+        syncMobileHud();
+        return;
+    }
+
+    const preset = LENS_PRESETS[index];
+    targetFov = preset.fov;
+    targetLensStrength = preset.strength;
+    targetLensK0 = preset.k0;
+    targetLensK1 = preset.k1;
+    targetLensK2 = preset.k2;
+    targetLensZoom = preset.zoom;
+    targetLensVignette = preset.vignette;
+
+    if (lensLabel) lensLabel.textContent = preset.label;
     syncMobileHud();
+}
+
+function cycleLensMode() {
+    const nextLensIndex = activeLensIndex >= LENS_PRESETS.length - 1 ? -1 : activeLensIndex + 1;
+    applyLensPreset(nextLensIndex);
+}
+
+function toggleViewfinder() {
+    cycleLensMode();
 }
 
 function updateViewfinderHudHint() {
@@ -76,8 +185,8 @@ function updateViewfinderHudHint() {
     if (!hint) return;
 
     hint.textContent = deviceType === 'mobile'
-        ? 'Camera button · capture  |  Eye button · exit'
-        : 'SPACE · capture  |  C · exit';
+        ? 'Camera button · capture  |  Eye button · cycle lens'
+        : 'SPACE · capture  |  C · cycle lens';
 }
 
 function setMobileQuickPanelOpen(isOpen) {
@@ -126,6 +235,25 @@ function syncMobilePanel() {
     }
 }
 
+function initWideAngleLens() {
+    // Only available with WebGL renderer (not WebGPU)
+    if (rendererType !== 'WebGL') return;
+
+    wideAngleComposer = new EffectComposer(renderer);
+    wideAngleComposer.setPixelRatio(window.devicePixelRatio);
+    wideAngleComposer.addPass(new RenderPass(scene, camera));
+
+    wideAnglePass = new ShaderPass(BarrelDistortionShader);
+    wideAnglePass.uniforms.strength.value = 0.0;
+    wideAnglePass.uniforms.k0.value = 0.0;
+    wideAnglePass.uniforms.k1.value = 0.0;
+    wideAnglePass.uniforms.k2.value = 0.0;
+    wideAnglePass.uniforms.vignette.value = 0.0;
+    wideAnglePass.uniforms.zoom.value = 1.0;
+    wideAngleComposer.addPass(wideAnglePass);
+    wideAngleComposer.addPass(new OutputPass());
+}
+
 async function captureScene() {
     captureFlash.style.display = 'block';
     audioManager.playShutter();
@@ -136,7 +264,11 @@ async function captureScene() {
     const countEl = document.getElementById('vf-capture-count');
     if (countEl) countEl.textContent = captureCounter.toString().padStart(3, '0');
     
-    renderer.render(scene, camera);
+    if (cameraViewfinderActive && wideAngleComposer) {
+        wideAngleComposer.render();
+    } else {
+        renderer.render(scene, camera);
+    }
     const dataUrl = renderer.domElement.toDataURL('image/png');
     
     try {
@@ -188,12 +320,11 @@ async function init() {
     // Initialize controls popup
     controlsPopup = new ControlsPopup(deviceType);
     
-    // Show controls button for all devices
-    const controlsToggle = document.getElementById('controls-toggle');
-    controlsToggle.classList.add('visible');
-    
-    // Mobile-specific setup
-    if (deviceType === 'mobile') {
+    // Show controls button for desktop devices
+    if (deviceType === 'desktop') {
+        const controlsToggle = document.getElementById('controls-toggle');
+        controlsToggle.classList.add('visible');
+    } else if (deviceType === 'mobile') {
         setupMobileControls();
         setupOrientationHandler();
     }
@@ -231,6 +362,9 @@ async function init() {
         
         container.appendChild(renderer.domElement);
         console.log('Renderer created successfully');
+
+        // Initialize wide-angle lens post-processing (WebGL only)
+        initWideAngleLens();
     } catch (error) {
         console.error('Failed to initialize renderer:', error);
         displayFatalError(`Failed to initialize renderer: ${error.message}`);
@@ -445,16 +579,15 @@ function updateControlInstructions() {
     
     if (deviceType === 'desktop') {
         spawnInstruction.textContent = 'Click cat to interact';
-        cameraInstruction.textContent = 'Drag to rotate view | Scroll to zoom | Enter VR for hand interaction | C: toggle viewfinder | Space: capture scene';
+        cameraInstruction.textContent = 'Drag to rotate view | Scroll to zoom | Enter VR for hand interaction | C: cycle lens | Space: capture scene';
     } else if (deviceType === 'mobile') {
         spawnInstruction.textContent = 'Tap cat to interact';
         cameraInstruction.textContent = 'Drag to rotate · Pinch to zoom';
     } else {
         spawnInstruction.textContent = 'Point controller ray at a cat and pull trigger to interact';
-        cameraInstruction.textContent = 'Left stick: move · Right stick: look · Y button: toggle viewfinder';
+        cameraInstruction.textContent = 'Left stick: move · Right stick: look · Y button: cycle lens';
     }
     
-    // Add F1 hint on desktop only
     if (infoElement && !document.getElementById('f1-hint') && deviceType !== 'mobile') {
         const f1Hint = document.createElement('p');
         f1Hint.id = 'f1-hint';
@@ -597,21 +730,18 @@ function onTouchMove(event) {
 
 function onTouchEnd(event) {
     isDragging = false;
-    // If the finger didn't move (tap), raycast directly — don't rely on
-    // synthetic click which may be suppressed by event.preventDefault() in touchmove.
     if (!hasDragged && event.changedTouches.length === 1) {
-        const t = event.changedTouches[0];
-        handleMobileTap(t.clientX, t.clientY);
+        const touch = event.changedTouches[0];
+        handleMobileTap(touch.clientX, touch.clientY);
     }
     hasDragged = false;
 }
 
 function handleMobileTap(clientX, clientY) {
-    // Ignore taps on UI elements overlaid on the canvas
     const el = document.elementFromPoint(clientX, clientY);
     if (el !== renderer.domElement) return;
 
-    mouse.x =  (clientX / window.innerWidth)  * 2 - 1;
+    mouse.x = (clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(clientY / window.innerHeight) * 2 + 1;
 
     raycaster.setFromCamera(mouse, camera);
@@ -634,40 +764,40 @@ function setupMobileControls() {
     const mobileControlsGuide = document.getElementById('mobile-controls-guide');
     const audioToggle = document.getElementById('audio-toggle');
 
-    mobViewfinder.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    mobViewfinder.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         toggleViewfinder();
     });
 
-    mobCapture.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    mobCapture.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         if (!cameraViewfinderActive) return;
         captureScene();
     });
 
-    mobPanelToggle.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    mobPanelToggle.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         setMobileQuickPanelOpen(!mobileQuickPanelOpen);
     });
 
-    mobilePanelClose.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    mobilePanelClose.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         setMobileQuickPanelOpen(false);
     });
 
-    mobileAudioToggle.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    mobileAudioToggle.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         audioToggle?.click();
     });
 
-    mobileControlsGuide.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    mobileControlsGuide.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         setMobileQuickPanelOpen(false);
         controlsPopup?.show();
     });
@@ -676,58 +806,72 @@ function setupMobileControls() {
         setMobileQuickPanelOpen(false);
     });
 
-    mobilePanelShell?.addEventListener('click', (e) => {
-        e.stopPropagation();
+    mobilePanelShell?.addEventListener('click', (event) => {
+        event.stopPropagation();
     });
 
     const zone = document.getElementById('joystick-zone');
     const thumb = document.getElementById('joystick-thumb');
-    const RADIUS = 38; // max displacement from center (px)
+    const radius = 38;
     let joystickTouchId = null;
-    let baseX = 0, baseY = 0;
+    let baseX = 0;
+    let baseY = 0;
 
-    zone.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (joystickTouchId !== null) return; // already tracking one finger
-        const t = e.changedTouches[0];
-        joystickTouchId = t.identifier;
+    zone.addEventListener('touchstart', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (joystickTouchId !== null) return;
+
+        const touch = event.changedTouches[0];
+        joystickTouchId = touch.identifier;
         const rect = zone.getBoundingClientRect();
-        baseX = rect.left + rect.width  / 2;
-        baseY = rect.top  + rect.height / 2;
+        baseX = rect.left + rect.width / 2;
+        baseY = rect.top + rect.height / 2;
         joystickState.active = true;
         zone.classList.add('active');
     }, { passive: false });
 
-    zone.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        let t = null;
-        for (const touch of e.changedTouches) {
-            if (touch.identifier === joystickTouchId) { t = touch; break; }
+    zone.addEventListener('touchmove', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        let touch = null;
+
+        for (const changedTouch of event.changedTouches) {
+            if (changedTouch.identifier === joystickTouchId) {
+                touch = changedTouch;
+                break;
+            }
         }
-        if (!t) return;
 
-        let dx = t.clientX - baseX;
-        let dy = t.clientY - baseY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > RADIUS) { dx = dx / dist * RADIUS; dy = dy / dist * RADIUS; }
+        if (!touch) return;
 
-        // Move the thumb visually
+        let dx = touch.clientX - baseX;
+        let dy = touch.clientY - baseY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance > radius) {
+            dx = dx / distance * radius;
+            dy = dy / distance * radius;
+        }
+
         thumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-
-        // Normalise to [-1, 1]
-        joystickState.dx = dx / RADIUS;
-        joystickState.dy = dy / RADIUS;
+        joystickState.dx = dx / radius;
+        joystickState.dy = dy / radius;
     }, { passive: false });
 
-    const endJoystick = (e) => {
-        e.preventDefault();
+    const endJoystick = (event) => {
+        event.preventDefault();
         let found = false;
-        for (const touch of e.changedTouches) {
-            if (touch.identifier === joystickTouchId) { found = true; break; }
+
+        for (const touch of event.changedTouches) {
+            if (touch.identifier === joystickTouchId) {
+                found = true;
+                break;
+            }
         }
+
         if (!found) return;
+
         joystickTouchId = null;
         joystickState.active = false;
         joystickState.dx = 0;
@@ -736,7 +880,7 @@ function setupMobileControls() {
         zone.classList.remove('active');
     };
 
-    zone.addEventListener('touchend',    endJoystick, { passive: false });
+    zone.addEventListener('touchend', endJoystick, { passive: false });
     zone.addEventListener('touchcancel', endJoystick, { passive: false });
 
     syncMobileHud();
@@ -749,6 +893,7 @@ function setupOrientationHandler() {
         const portrait = window.matchMedia('(orientation: portrait)').matches;
         warning.style.display = portrait ? 'flex' : 'none';
     };
+
     check();
     window.addEventListener('orientationchange', check);
     window.matchMedia('(orientation: portrait)').addEventListener('change', check);
@@ -949,7 +1094,7 @@ function onKeyDown(event) {
         cameraRadius = Math.min(30, cameraRadius + 1);
         updateCameraPosition();
     } else if (event.code === 'KeyC') {
-        toggleViewfinder();
+        cycleLensMode();
     } else if (event.code === 'Escape' && mobileQuickPanelOpen) {
         setMobileQuickPanelOpen(false);
     }
@@ -971,6 +1116,11 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+
+    if (wideAngleComposer) {
+        wideAngleComposer.setPixelRatio(window.devicePixelRatio);
+        wideAngleComposer.setSize(window.innerWidth, window.innerHeight);
+    }
     
     // Ensure canvas is visible and properly sized
     const canvas = renderer.domElement;
@@ -1057,11 +1207,11 @@ function handleXRLocomotion(delta) {
             // 1: Grip (side button)
             // 2: X/Y button (Y button on right controller)
             
-            // Toggle viewfinder with Y button (button index 2 on right controller)
+            // Cycle lens presets with Y button (button index 2 on right controller)
             if (source.handedness === 'right' && buttons[2] && buttons[2].pressed) {
                 // Debounce the button press to prevent rapid toggling
                 if (!xrInteractionCooldown.get('viewfinder-toggle')) {
-                    toggleViewfinder();
+                    cycleLensMode();
                     xrInteractionCooldown.set('viewfinder-toggle', true);
                     setTimeout(() => xrInteractionCooldown.delete('viewfinder-toggle'), 300);
                 }
@@ -1106,17 +1256,38 @@ function renderFrame(time = performance.now()) {
         handleXRLocomotion(delta);
         handleXRHandInteractions();
 
-        // Apply mobile joystick input to orbit camera
         if (joystickState.active) {
-            const ORBIT_SPEED  = 1.2; // radians/s
-            const ZOOM_SPEED   = 8;   // units/s
-            cameraAngle  += joystickState.dx * ORBIT_SPEED * delta;
-            cameraRadius  = Math.max(5, Math.min(30, cameraRadius + joystickState.dy * ZOOM_SPEED * delta));
+            const ORBIT_SPEED = 1.2;
+            const ZOOM_SPEED = 8;
+            cameraAngle += joystickState.dx * ORBIT_SPEED * delta;
+            cameraRadius = Math.max(5, Math.min(30, cameraRadius + joystickState.dy * ZOOM_SPEED * delta));
             updateCameraPosition();
         }
         
         updateDashboard();
-        renderer.render(scene, camera);
+
+        const lensTransition = Math.min(delta * 6, 1);
+
+        if (Math.abs(currentFov - targetFov) > 0.01) {
+            currentFov += (targetFov - currentFov) * lensTransition;
+            camera.fov = currentFov;
+            camera.updateProjectionMatrix();
+        }
+
+        if (wideAnglePass) {
+            wideAnglePass.uniforms.strength.value += (targetLensStrength - wideAnglePass.uniforms.strength.value) * lensTransition;
+            wideAnglePass.uniforms.k0.value += (targetLensK0 - wideAnglePass.uniforms.k0.value) * lensTransition;
+            wideAnglePass.uniforms.k1.value += (targetLensK1 - wideAnglePass.uniforms.k1.value) * lensTransition;
+            wideAnglePass.uniforms.k2.value += (targetLensK2 - wideAnglePass.uniforms.k2.value) * lensTransition;
+            wideAnglePass.uniforms.vignette.value += (targetLensVignette - wideAnglePass.uniforms.vignette.value) * lensTransition;
+            wideAnglePass.uniforms.zoom.value += (targetLensZoom - wideAnglePass.uniforms.zoom.value) * lensTransition;
+        }
+
+        if (cameraViewfinderActive && wideAngleComposer) {
+            wideAngleComposer.render();
+        } else {
+            renderer.render(scene, camera);
+        }
     } catch (error) {
         console.error('Error in render loop:', error);
         // Display error message on screen

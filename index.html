@@ -26,13 +26,11 @@
     </div>
 
     <!-- Mobile touch controls overlay -->
-    <!-- Left: virtual joystick for camera navigation -->
     <div id="joystick-zone" aria-hidden="true">
         <div id="joystick-base">
             <div id="joystick-thumb"></div>
         </div>
     </div>
-    <!-- Right: action buttons -->
     <div id="mob-action-btns">
         <button id="mob-viewfinder" class="mob-btn" aria-label="Toggle viewfinder">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3,3H9V5H5V9H3V3M21,3V9H19V5H15V3H21M3,21V15H5V19H9V21H3M21,21H15V19H19V15H21V21M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8M12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14A2,2 0 0,0 14,12A2,2 0 0,0 12,10Z"/></svg>
@@ -109,7 +107,8 @@
         <div class="vf-hud">
             <span class="vf-hud-icon">⬤</span>
             <span class="vf-hud-count" id="vf-capture-count">000</span>
-            <span class="vf-hud-hint" id="vf-hud-hint">SPACE · capture &nbsp;|&nbsp; C · exit</span>
+            <span class="vf-hud-count" id="vf-lens-label">150MM</span>
+            <span class="vf-hud-hint" id="vf-hud-hint">SPACE · capture &nbsp;|&nbsp; C · cycle lens</span>
         </div>
     </div>
     
@@ -119,7 +118,7 @@
     <div id="info">
         <h1>Forest Ocelot VR Experience</h1>
         <p id="spawn-instruction">Click cat to interact</p>
-        <p id="camera-instruction">Drag to rotate view | C: toggle viewfinder | Space: capture scene</p>
+        <p id="camera-instruction">Drag to rotate view | C: cycle lens | Space: capture scene</p>
     </div>
     <div id="dashboard">
         <div class="dashboard-header">
