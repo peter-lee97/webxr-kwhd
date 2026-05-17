@@ -117,24 +117,33 @@ export class Environment {
     
     loadHouse() {
         const loader = new GLTFLoader();
-        loader.load('models/house_1.gltf', (gltf) => {
-            const house = gltf.scene;
-            house.position.copy(this.houseExclusionZone.position);
-            house.position.y = 0;
-            
-            // Set up shadows for the house
-            house.traverse((child) => {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                }
-            });
-            
-            this.scene.add(house);
-            console.log('House model loaded and positioned at', house.position);
-        }, undefined, (error) => {
-            console.error('Failed to load house model:', error);
-        });
+        const modelPath = '/models/house_1.gltf';
+        
+        loader.load(
+            modelPath,
+            (gltf) => {
+                const house = gltf.scene;
+                house.position.copy(this.houseExclusionZone.position);
+                house.position.y = 0;
+                
+                // Set up shadows for the house
+                house.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                
+                this.scene.add(house);
+                console.log('✓ House model loaded and positioned at', house.position);
+            },
+            (progress) => {
+                console.log(`Loading house: ${(progress.loaded / progress.total * 100).toFixed(1)}%`);
+            },
+            (error) => {
+                console.error('✗ Failed to load house model:', error);
+            }
+        );
     }
     
     createWaterBody(position, size) {
