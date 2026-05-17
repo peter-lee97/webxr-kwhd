@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export class Environment {
     constructor(scene) {
@@ -9,6 +10,10 @@ export class Environment {
         this.bushes = [];
         this.waterBodies = [];
         this.grassInstances = [];
+        this.houseExclusionZone = {
+            position: new THREE.Vector3(-25, 0, -25),
+            radius: 8
+        };
         
         console.log('Creating environment components...');
         try {
@@ -16,6 +21,13 @@ export class Environment {
             console.log('Ground created');
         } catch (error) {
             console.error('Failed to create ground:', error);
+        }
+        
+        try {
+            this.loadHouse();
+            console.log('House loaded');
+        } catch (error) {
+            console.error('Failed to load house:', error);
         }
         
         try {
@@ -96,6 +108,33 @@ export class Environment {
         this.ground.receiveShadow = true;
         this.ground.castShadow = false;
         this.scene.add(this.ground);
+    }
+    
+    isPositionInExclusionZone(position) {
+        const distance = position.distanceTo(this.houseExclusionZone.position);
+        return distance < this.houseExclusionZone.radius;
+    }
+    
+    loadHouse() {
+        const loader = new GLTFLoader();
+        loader.load('models/house_1.gltf', (gltf) => {
+            const house = gltf.scene;
+            house.position.copy(this.houseExclusionZone.position);
+            house.position.y = 0;
+            
+            // Set up shadows for the house
+            house.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+            
+            this.scene.add(house);
+            console.log('House model loaded and positioned at', house.position);
+        }, undefined, (error) => {
+            console.error('Failed to load house model:', error);
+        });
     }
     
     createWaterBody(position, size) {
@@ -485,11 +524,19 @@ export class Environment {
         const boundarySize = 45;
         
         for (let i = 0; i < rockCount; i++) {
-            const x = (Math.random() - 0.5) * boundarySize * 1.8;
-            const z = (Math.random() - 0.5) * boundarySize * 1.8;
-            const y = 0;
+            let x, z;
+            let position;
+            let inExclusionZone = true;
             
-            this.createRock(new THREE.Vector3(x, y, z));
+            // Keep trying until we find a position outside the exclusion zone
+            while (inExclusionZone) {
+                x = (Math.random() - 0.5) * boundarySize * 1.8;
+                z = (Math.random() - 0.5) * boundarySize * 1.8;
+                position = new THREE.Vector3(x, 0, z);
+                inExclusionZone = this.isPositionInExclusionZone(position);
+            }
+            
+            this.createRock(position);
         }
     }
     
@@ -527,11 +574,19 @@ export class Environment {
         const boundarySize = 45;
         
         for (let i = 0; i < logCount; i++) {
-            const x = (Math.random() - 0.5) * boundarySize * 1.8;
-            const z = (Math.random() - 0.5) * boundarySize * 1.8;
-            const y = 0;
+            let x, z;
+            let position;
+            let inExclusionZone = true;
             
-            this.createLog(new THREE.Vector3(x, y, z));
+            // Keep trying until we find a position outside the exclusion zone
+            while (inExclusionZone) {
+                x = (Math.random() - 0.5) * boundarySize * 1.8;
+                z = (Math.random() - 0.5) * boundarySize * 1.8;
+                position = new THREE.Vector3(x, 0, z);
+                inExclusionZone = this.isPositionInExclusionZone(position);
+            }
+            
+            this.createLog(position);
         }
     }
     
@@ -581,11 +636,19 @@ export class Environment {
         const boundarySize = 45;
         
         for (let i = 0; i < bushCount; i++) {
-            const x = (Math.random() - 0.5) * boundarySize * 1.8;
-            const z = (Math.random() - 0.5) * boundarySize * 1.8;
-            const y = 0;
+            let x, z;
+            let position;
+            let inExclusionZone = true;
             
-            this.createBush(new THREE.Vector3(x, y, z));
+            // Keep trying until we find a position outside the exclusion zone
+            while (inExclusionZone) {
+                x = (Math.random() - 0.5) * boundarySize * 1.8;
+                z = (Math.random() - 0.5) * boundarySize * 1.8;
+                position = new THREE.Vector3(x, 0, z);
+                inExclusionZone = this.isPositionInExclusionZone(position);
+            }
+            
+            this.createBush(position);
         }
     }
     
@@ -611,22 +674,31 @@ export class Environment {
         
         const dummy = new THREE.Object3D();
         
-        for (let i = 0; i < grassCount; i++) {
+        let instanceIndex = 0;
+        let attempts = 0;
+        const maxAttempts = grassCount * 2; // Prevent infinite loops
+        
+        while (instanceIndex < grassCount && attempts < maxAttempts) {
             const x = (Math.random() - 0.5) * boundarySize * 2;
             const z = (Math.random() - 0.5) * boundarySize * 2;
             const y = 0.1;
             
-            dummy.position.set(x, y, z);
-            
-            // Random rotation
-            dummy.rotation.y = Math.random() * Math.PI * 2;
-            
-            // Random scale
-            const scale = 0.5 + Math.random() * 0.8;
-            dummy.scale.set(scale, scale, scale);
-            
-            dummy.updateMatrix();
-            grassInstances.setMatrixAt(i, dummy.matrix);
+            const position = new THREE.Vector3(x, 0, z);
+            if (!this.isPositionInExclusionZone(position)) {
+                dummy.position.set(x, y, z);
+                
+                // Random rotation
+                dummy.rotation.y = Math.random() * Math.PI * 2;
+                
+                // Random scale
+                const scale = 0.5 + Math.random() * 0.8;
+                dummy.scale.set(scale, scale, scale);
+                
+                dummy.updateMatrix();
+                grassInstances.setMatrixAt(instanceIndex, dummy.matrix);
+                instanceIndex++;
+            }
+            attempts++;
         }
         
         this.scene.add(grassInstances);
@@ -641,8 +713,18 @@ export class Environment {
         const boundarySize = 45;
         
         for (let i = 0; i < flowerCount; i++) {
-            const x = (Math.random() - 0.5) * boundarySize * 1.8;
-            const z = (Math.random() - 0.5) * boundarySize * 1.8;
+            let x, z;
+            let position;
+            let inExclusionZone = true;
+            
+            // Keep trying until we find a position outside the exclusion zone
+            while (inExclusionZone) {
+                x = (Math.random() - 0.5) * boundarySize * 1.8;
+                z = (Math.random() - 0.5) * boundarySize * 1.8;
+                position = new THREE.Vector3(x, 0, z);
+                inExclusionZone = this.isPositionInExclusionZone(position);
+            }
+            
             const y = 0.1;
             
             // Random flower color
