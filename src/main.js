@@ -585,7 +585,7 @@ function updateControlInstructions() {
         cameraInstruction.textContent = 'Drag to rotate · Pinch to zoom';
     } else {
         spawnInstruction.textContent = 'Point controller ray at a cat and pull trigger to interact';
-        cameraInstruction.textContent = 'Left stick: move · Right stick: look · Y button: cycle lens';
+        cameraInstruction.textContent = 'Left stick: move · Right stick: look · Right A/B: cycle lens';
     }
     
     if (infoElement && !document.getElementById('f1-hint') && deviceType !== 'mobile') {
@@ -1185,6 +1185,40 @@ function handleXRHandInteractions() {
     });
 }
 
+function getXRThumbstickAxes(axes) {
+    if (!axes || axes.length < 2) {
+        return { x: 0, y: 0 };
+    }
+
+    // Quest controllers expose the active thumbstick on axes[0/1].
+    // Keep axes[2/3] as a fallback for runtimes that report the stick there.
+    let rawX = Number.isFinite(axes[0]) ? axes[0] : 0;
+    let rawY = Number.isFinite(axes[1]) ? axes[1] : 0;
+
+    if (axes.length >= 4 && Number.isFinite(axes[2]) && Number.isFinite(axes[3])) {
+        const primaryIdle = Math.abs(rawX) <= VR_DEAD_ZONE && Math.abs(rawY) <= VR_DEAD_ZONE;
+        const fallbackActive = Math.abs(axes[2]) > VR_DEAD_ZONE || Math.abs(axes[3]) > VR_DEAD_ZONE;
+        if (primaryIdle && fallbackActive) {
+            rawX = axes[2];
+            rawY = axes[3];
+        }
+    }
+
+    return {
+        x: Math.abs(rawX) > VR_DEAD_ZONE ? rawX : 0,
+        y: Math.abs(rawY) > VR_DEAD_ZONE ? rawY : 0
+    };
+}
+
+function isXRLensCyclePressed(buttons) {
+    if (!buttons || !buttons.length) return false;
+
+    // Standard WebXR gamepad mapping:
+    // 4 = primary face button (A/X), 5 = secondary face button (B/Y)
+    // Keep index 2 as legacy fallback for older mappings.
+    return Boolean(buttons[4]?.pressed || buttons[5]?.pressed || buttons[2]?.pressed);
+}
+
 function handleXRLocomotion(delta) {
     if (!renderer.xr.isPresenting) return;
     
@@ -1195,20 +1229,14 @@ function handleXRLocomotion(delta) {
         if (!source.gamepad) continue;
         const axes = source.gamepad.axes;
         const buttons = source.gamepad.buttons;
-        if ((!axes || axes.length < 4) && (!buttons || buttons.length < 3)) continue;
-        
-        const stickX = Math.abs(axes[2]) > VR_DEAD_ZONE ? axes[2] : 0;
-        const stickY = Math.abs(axes[3]) > VR_DEAD_ZONE ? axes[3] : 0;
+        if ((!axes || !axes.length) && (!buttons || !buttons.length)) continue;
+
+        const { x: stickX, y: stickY } = getXRThumbstickAxes(axes);
         
         // Handle button inputs for camera functions
-        if (buttons && buttons.length >= 3) {
-            // Button mapping for Oculus/Meta Quest controllers:
-            // 0: Trigger (primary interaction)
-            // 1: Grip (side button)
-            // 2: X/Y button (Y button on right controller)
-            
-            // Cycle lens presets with Y button (button index 2 on right controller)
-            if (source.handedness === 'right' && buttons[2] && buttons[2].pressed) {
+        if (buttons && buttons.length) {
+            // Cycle lens presets with right controller face buttons (A/B).
+            if (source.handedness === 'right' && isXRLensCyclePressed(buttons)) {
                 // Debounce the button press to prevent rapid toggling
                 if (!xrInteractionCooldown.get('viewfinder-toggle')) {
                     cycleLensMode();
