@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export class Environment {
     constructor(scene) {
@@ -10,9 +9,10 @@ export class Environment {
         this.bushes = [];
         this.waterBodies = [];
         this.grassInstances = [];
+        this.houseCollisionBox = null;
         this.houseExclusionZone = {
-            position: new THREE.Vector3(-25, 0, -25),
-            radius: 8
+            position: new THREE.Vector3(-12, 0, -12),
+            radius: 10
         };
         
         console.log('Creating environment components...');
@@ -21,13 +21,6 @@ export class Environment {
             console.log('Ground created');
         } catch (error) {
             console.error('Failed to create ground:', error);
-        }
-        
-        try {
-            this.loadHouse();
-            console.log('House loaded');
-        } catch (error) {
-            console.error('Failed to load house:', error);
         }
         
         try {
@@ -89,16 +82,9 @@ export class Environment {
         // Add more detailed variation to the ground surface
         const vertices = groundGeometry.attributes.position.array;
         for (let i = 0; i < vertices.length; i += 3) {
-            // Add some random height variation to create a natural terrain look
             const x = vertices[i];
             const z = vertices[i + 1];
-            
-            // Use multiple noise functions for more natural terrain
-            const noise1 = Math.sin(x * 0.1) * Math.cos(z * 0.1) * 0.3;
-            const noise2 = Math.sin(x * 0.3) * Math.cos(z * 0.3) * 0.1;
-            const noise3 = Math.sin(x * 0.05) * Math.cos(z * 0.05) * 0.5;
-            
-            vertices[i + 2] = noise1 + noise2 + noise3;
+            vertices[i + 2] = this.getTerrainHeightAt(x, z);
         }
         groundGeometry.attributes.position.needsUpdate = true;
         groundGeometry.computeVertexNormals();
@@ -109,41 +95,47 @@ export class Environment {
         this.ground.castShadow = false;
         this.scene.add(this.ground);
     }
+
+    getTerrainHeightAt(x, z) {
+        const noise1 = Math.sin(x * 0.1) * Math.cos(z * 0.1) * 0.3;
+        const noise2 = Math.sin(x * 0.3) * Math.cos(z * 0.3) * 0.1;
+        const noise3 = Math.sin(x * 0.05) * Math.cos(z * 0.05) * 0.5;
+        return noise1 + noise2 + noise3;
+    }
     
     isPositionInExclusionZone(position) {
         const distance = position.distanceTo(this.houseExclusionZone.position);
         return distance < this.houseExclusionZone.radius;
     }
     
-    loadHouse() {
-        const loader = new GLTFLoader();
-        const modelPath = '/models/house_1.gltf';
-        
-        loader.load(
-            modelPath,
-            (gltf) => {
-                const house = gltf.scene;
-                house.position.copy(this.houseExclusionZone.position);
-                house.position.y = 0;
-                
-                // Set up shadows for the house
-                house.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                    }
-                });
-                
-                this.scene.add(house);
-                console.log('✓ House model loaded and positioned at', house.position);
-            },
-            (progress) => {
-                console.log(`Loading house: ${(progress.loaded / progress.total * 100).toFixed(1)}%`);
-            },
-            (error) => {
-                console.error('✗ Failed to load house model:', error);
-            }
-        );
+    constrainPositionAgainstHouse(position, padding = 0.35) {
+        if (!this.houseCollisionBox) return;
+
+        const minX = this.houseCollisionBox.min.x - padding;
+        const maxX = this.houseCollisionBox.max.x + padding;
+        const minZ = this.houseCollisionBox.min.z - padding;
+        const maxZ = this.houseCollisionBox.max.z + padding;
+
+        const insideX = position.x > minX && position.x < maxX;
+        const insideZ = position.z > minZ && position.z < maxZ;
+        if (!insideX || !insideZ) return;
+
+        const pushToMinX = Math.abs(position.x - minX);
+        const pushToMaxX = Math.abs(maxX - position.x);
+        const pushToMinZ = Math.abs(position.z - minZ);
+        const pushToMaxZ = Math.abs(maxZ - position.z);
+
+        const nearestBoundary = Math.min(pushToMinX, pushToMaxX, pushToMinZ, pushToMaxZ);
+
+        if (nearestBoundary === pushToMinX) {
+            position.x = minX;
+        } else if (nearestBoundary === pushToMaxX) {
+            position.x = maxX;
+        } else if (nearestBoundary === pushToMinZ) {
+            position.z = minZ;
+        } else {
+            position.z = maxZ;
+        }
     }
     
     createWaterBody(position, size) {

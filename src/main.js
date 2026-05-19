@@ -8,6 +8,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { createOcelot } from './components/VoxelOcelot.js';
 import { createButterfly } from './components/VoxelButterfly.js';
+import { createBlackHeadedGrosbeak } from './components/VoxelBlackHeadedGrosbeak.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Environment } from './components/Environment.js';
 import { ControlsPopup } from './components/ControlsPopup.js';
@@ -65,6 +66,7 @@ const BarrelDistortionShader = {
 let scene, camera, renderer, cameraRig;
 let ocelots = [];
 let butterflies = [];
+let grosbeaks = [];
 let environment; // Add environment reference
 let floor;
 let cameraAngle = 0;
@@ -90,8 +92,11 @@ const mouse = new THREE.Vector2();
 const xrDirectionMatrix = new THREE.Matrix4();
 const xrRayOrigin = new THREE.Vector3();
 const xrRayDirection = new THREE.Vector3();
+const xrCollisionPadding = 0.4;
 const ocelotMeshes = [];
 const ocelotMeshToEntity = new Map();
+const grosbeakMeshes = [];
+const grosbeakMeshToEntity = new Map();
 const xrControllers = [];
 const xrHands = [];
 const xrInteractionCooldown = new Map();
@@ -494,6 +499,15 @@ async function init() {
         spawnButterfly(x, z);
     }
     console.log(`Spawned ${butterflyCount} butterflies`);
+
+    const grosbeakCount = 2 + Math.floor(Math.random() * 3); // 2-4
+    const grosbeakSpawnHalf = boundarySize / 2 - 5;
+    for (let i = 0; i < grosbeakCount; i++) {
+        const x = THREE.MathUtils.randFloat(-grosbeakSpawnHalf, grosbeakSpawnHalf);
+        const z = THREE.MathUtils.randFloat(-grosbeakSpawnHalf, grosbeakSpawnHalf);
+        spawnGrosbeak(x, z);
+    }
+    console.log(`Spawned ${grosbeakCount} grosbeaks`);
     
     updateControlInstructions();
     updateDashboard();
@@ -746,6 +760,15 @@ function handleMobileTap(clientX, clientY) {
 
     raycaster.setFromCamera(mouse, camera);
 
+    const grosbeakHits = raycaster.intersectObjects(grosbeakMeshes, false);
+    if (grosbeakHits.length > 0) {
+        const grosbeak = grosbeakMeshToEntity.get(grosbeakHits[0].object);
+        if (grosbeak) {
+            triggerGrosbeakInteraction(grosbeak, 'cursor');
+            return;
+        }
+    }
+
     const hits = raycaster.intersectObjects(ocelotMeshes, false);
     if (hits.length > 0) {
         const ocelot = ocelotMeshToEntity.get(hits[0].object);
@@ -899,10 +922,18 @@ function setupOrientationHandler() {
     window.matchMedia('(orientation: portrait)').addEventListener('change', check);
 }
 
+function getTerrainY(x, z) {
+    if (!environment || typeof environment.getTerrainHeightAt !== 'function') {
+        return 0;
+    }
+    return environment.getTerrainHeightAt(x, z);
+}
+
 function spawnOcelot(x, z) {
     try {
+        const groundY = getTerrainY(x, z);
         const ocelot = createOcelot({
-            position: new THREE.Vector3(x, 0, z),
+            position: new THREE.Vector3(x, groundY, z),
             boundarySize: boundarySize
         });
         
@@ -938,11 +969,44 @@ function spawnButterfly(x, z) {
     }
 }
 
+function spawnGrosbeak(x, z) {
+    try {
+        const groundY = getTerrainY(x, z);
+        const grosbeak = createBlackHeadedGrosbeak({
+            position: new THREE.Vector3(x, groundY, z),
+            boundarySize,
+            roaming: true,
+            constrainPosition: (position) => {
+                environment?.constrainPositionAgainstHouse(position, xrCollisionPadding);
+            }
+        });
+
+        if (grosbeak && grosbeak.group) {
+            grosbeaks.push(grosbeak);
+            scene.add(grosbeak.group);
+            registerGrosbeakMeshes(grosbeak);
+            return grosbeak;
+        }
+    } catch (error) {
+        console.error('Failed to spawn grosbeak at', x, z, ':', error);
+        return null;
+    }
+}
+
 function registerOcelotMeshes(ocelot) {
     ocelot.group.traverse(child => {
         if (child.isMesh) {
             ocelotMeshes.push(child);
             ocelotMeshToEntity.set(child, ocelot);
+        }
+    });
+}
+
+function registerGrosbeakMeshes(grosbeak) {
+    grosbeak.group.traverse(child => {
+        if (child.isMesh) {
+            grosbeakMeshes.push(child);
+            grosbeakMeshToEntity.set(child, grosbeak);
         }
     });
 }
@@ -1026,6 +1090,15 @@ function onMouseClick(event) {
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
     
     raycaster.setFromCamera(mouse, camera);
+
+    const grosbeakHits = raycaster.intersectObjects(grosbeakMeshes, false);
+    if (grosbeakHits.length > 0) {
+        const grosbeak = grosbeakMeshToEntity.get(grosbeakHits[0].object);
+        if (grosbeak) {
+            triggerGrosbeakInteraction(grosbeak, 'cursor');
+            return;
+        }
+    }
     
     const ocelotHits = raycaster.intersectObjects(ocelotMeshes, false);
     if (ocelotHits.length > 0) {
@@ -1047,6 +1120,12 @@ function triggerOcelotInteraction(ocelot, sourceId) {
     }
     ocelot.notifyInteraction();
     lastInteractionLabel = `${sourceId}: ${interaction.sound || 'no-sound'}`;
+    updateDashboard();
+}
+
+function triggerGrosbeakInteraction(grosbeak, sourceId) {
+    const interaction = grosbeak.interact(sourceId);
+    lastInteractionLabel = `${sourceId}: ${interaction.action || 'hopping'}`;
     updateDashboard();
 }
 
@@ -1257,6 +1336,7 @@ function handleXRLocomotion(delta) {
             const half = boundarySize / 2;
             cameraRig.position.x = Math.max(-half, Math.min(half, cameraRig.position.x));
             cameraRig.position.z = Math.max(-half, Math.min(half, cameraRig.position.z));
+            environment?.constrainPositionAgainstHouse(cameraRig.position, xrCollisionPadding);
         } else if (source.handedness === 'right') {
             cameraRig.rotation.y -= stickX * VR_LOOK_SPEED * delta;
         }
@@ -1269,13 +1349,27 @@ function renderFrame(time = performance.now()) {
         lastFrameTime = time;
         
         ocelots.forEach(ocelot => {
+            const groundY = getTerrainY(ocelot.group.position.x, ocelot.group.position.z);
+            ocelot.baseGroupY = groundY;
+            if (ocelot.targetPosition) {
+                ocelot.targetPosition.y = groundY;
+            }
             ocelot.animate();
+            if (ocelot.currentAction !== 'jump') {
+                ocelot.group.position.y = groundY;
+            }
+        });
+
+        grosbeaks.forEach(grosbeak => {
+            const groundY = getTerrainY(grosbeak.group.position.x, grosbeak.group.position.z);
+            grosbeak.baseGroupY = groundY + (grosbeak.groundOffset || 0);
+            grosbeak.animate();
         });
         
         butterflies.forEach(butterfly => {
             butterfly.animate();
         });
-        
+
         // Update environment if it has an update method
         if (environment && typeof environment.update === 'function') {
             environment.update();
