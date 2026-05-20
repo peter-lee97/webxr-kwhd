@@ -9,6 +9,8 @@ export class Environment {
         this.bushes = [];
         this.waterBodies = [];
         this.grassInstances = [];
+        this.grassPatches = [];
+        this.flowers = [];
         this.houseCollisionBox = null;
         this.houseExclusionZone = {
             position: new THREE.Vector3(-12, 0, -12),
@@ -654,13 +656,44 @@ export class Environment {
     }
     
     createGrass() {
-        // Create grass using instanced meshes for performance
-        const grassCount = 500;
+        // Create clustered grass using instanced meshes for performance
         const boundarySize = 45;
-        
-        // Create a simple grass blade geometry
-        const grassGeometry = new THREE.PlaneGeometry(0.1, 0.5);
-        grassGeometry.translate(0, 0.25, 0); // Center at base
+        const clusterCount = 95;
+        const minBladesPerCluster = 14;
+        const maxBladesPerCluster = 32;
+
+        const clusters = [];
+        let grassCount = 0;
+
+        for (let i = 0; i < clusterCount; i++) {
+            let attempts = 0;
+            let center = null;
+
+            while (attempts < 24 && !center) {
+                const x = (Math.random() - 0.5) * boundarySize * 1.9;
+                const z = (Math.random() - 0.5) * boundarySize * 1.9;
+                const candidate = new THREE.Vector3(x, 0, z);
+                if (!this.isPositionInExclusionZone(candidate)) {
+                    center = candidate;
+                }
+                attempts++;
+            }
+
+            if (!center) continue;
+
+            const bladeCount = minBladesPerCluster + Math.floor(Math.random() * (maxBladesPerCluster - minBladesPerCluster + 1));
+            const radius = 0.24 + Math.random() * 0.6;
+            const heightScale = 0.75 + Math.random() * 0.9;
+
+            clusters.push({center, bladeCount, radius, heightScale});
+            grassCount += bladeCount;
+        }
+
+        if (grassCount === 0) return;
+
+        // Higher-resolution blade mesh for smoother silhouette.
+        const grassGeometry = new THREE.PlaneGeometry(0.12, 0.62, 1, 4);
+        grassGeometry.translate(0, 0.31, 0); // Center at base
         
         const grassMaterial = new THREE.MeshStandardMaterial({
             color: 0x4E9C45,
@@ -674,36 +707,51 @@ export class Environment {
         grassInstances.receiveShadow = true;
         
         const dummy = new THREE.Object3D();
+        const bladeData = [];
         
         let instanceIndex = 0;
-        let attempts = 0;
-        const maxAttempts = grassCount * 2; // Prevent infinite loops
-        
-        while (instanceIndex < grassCount && attempts < maxAttempts) {
-            const x = (Math.random() - 0.5) * boundarySize * 2;
-            const z = (Math.random() - 0.5) * boundarySize * 2;
-            const y = 0.1;
-            
-            const position = new THREE.Vector3(x, 0, z);
-            if (!this.isPositionInExclusionZone(position)) {
+
+        clusters.forEach(cluster => {
+            for (let i = 0; i < cluster.bladeCount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.sqrt(Math.random()) * cluster.radius;
+                const x = cluster.center.x + Math.cos(angle) * distance;
+                const z = cluster.center.z + Math.sin(angle) * distance;
+                const y = this.getTerrainHeightAt(x, z) + 0.04;
+
                 dummy.position.set(x, y, z);
-                
-                // Random rotation
                 dummy.rotation.y = Math.random() * Math.PI * 2;
-                
-                // Random scale
-                const scale = 0.5 + Math.random() * 0.8;
-                dummy.scale.set(scale, scale, scale);
-                
+                dummy.rotation.x = (Math.random() - 0.5) * 0.12;
+                dummy.rotation.z = (Math.random() - 0.5) * 0.18;
+
+                const baseScale = 0.55 + Math.random() * 0.85;
+                const widthScale = (0.7 + Math.random() * 0.7) * (0.88 + Math.random() * 0.25);
+                dummy.scale.set(widthScale, baseScale * cluster.heightScale, widthScale);
+
                 dummy.updateMatrix();
                 grassInstances.setMatrixAt(instanceIndex, dummy.matrix);
+                bladeData.push({
+                    x,
+                    y,
+                    z,
+                    yaw: dummy.rotation.y,
+                    basePitch: dummy.rotation.x,
+                    baseRoll: dummy.rotation.z,
+                    scaleX: dummy.scale.x,
+                    scaleY: dummy.scale.y,
+                    scaleZ: dummy.scale.z,
+                    phase: Math.random() * Math.PI * 2,
+                    speed: 0.55 + Math.random() * 0.9,
+                    ampX: 0.03 + Math.random() * 0.05,
+                    ampZ: 0.04 + Math.random() * 0.07
+                });
                 instanceIndex++;
             }
-            attempts++;
-        }
+        });
         
         this.scene.add(grassInstances);
         this.grassInstances.push(grassInstances);
+        this.grassPatches.push({mesh: grassInstances, blades: bladeData});
         
         // Add some flowers among the grass
         this.createFlowers();
@@ -712,6 +760,15 @@ export class Environment {
     createFlowers() {
         const flowerCount = 30;
         const boundarySize = 45;
+        const petalColors = [
+            0xff5aa5, // vivid pink
+            0xff6f61, // coral
+            0xffb347, // bright orange
+            0xff66cc, // hot magenta
+            0xb388ff, // bright violet
+            0x66d9ff  // sky cyan
+        ];
+        const nectarColors = [0xfff176, 0xffd54f, 0xffc107];
         
         for (let i = 0; i < flowerCount; i++) {
             let x, z;
@@ -726,11 +783,8 @@ export class Environment {
                 inExclusionZone = this.isPositionInExclusionZone(position);
             }
             
-            const y = 0.1;
-            
-            // Random flower color
-            const colors = [0xffeb3b, 0xe91e63, 0x9c27b0, 0xff9800, 0xf44336];
-            const color = colors[Math.floor(Math.random() * colors.length)];
+            const groundY = this.getTerrainHeightAt(x, z);
+            const y = groundY + 0.04;
             
             // Create flower stem
             const stemHeight = 0.3 + Math.random() * 0.4;
@@ -747,21 +801,77 @@ export class Environment {
             stem.receiveShadow = true;
             this.scene.add(stem);
             
-            // Create flower head
-            const headSize = 0.1 + Math.random() * 0.1;
-            const headGeometry = new THREE.SphereGeometry(headSize, 8, 8);
-            const headMaterial = new THREE.MeshStandardMaterial({
-                color: color,
-                roughness: 0.8,
-                metalness: 0.2
+            const flowerTopY = y + stemHeight;
+            const petalCount = 6;
+            const petalRadius = 0.055 + Math.random() * 0.04;
+            const petalOffset = 0.05 + Math.random() * 0.03;
+            const petalWidthScale = 1.9 + Math.random() * 0.6;
+            const petalDepthScale = 1.35 + Math.random() * 0.4;
+            const petalFlatScale = 0.36 + Math.random() * 0.1;
+            const petalColor = petalColors[Math.floor(Math.random() * petalColors.length)];
+            const nectarColor = nectarColors[Math.floor(Math.random() * nectarColors.length)];
+            const petalGeometry = new THREE.SphereGeometry(petalRadius, 8, 8);
+            const petalMaterial = new THREE.MeshStandardMaterial({
+                color: petalColor,
+                roughness: 0.7,
+                metalness: 0.1
             });
-            
-            const head = new THREE.Mesh(headGeometry, headMaterial);
-            head.position.set(x, y + stemHeight, z);
-            head.castShadow = true;
-            head.receiveShadow = true;
-            this.scene.add(head);
+            const petals = [];
+
+            for (let p = 0; p < petalCount; p++) {
+                const angle = (p / petalCount) * Math.PI * 2;
+                const petal = new THREE.Mesh(petalGeometry, petalMaterial);
+                petal.position.set(
+                    x + Math.cos(angle) * petalOffset,
+                    flowerTopY + 0.003,
+                    z + Math.sin(angle) * petalOffset
+                );
+                petal.scale.set(petalWidthScale, petalFlatScale, petalDepthScale);
+                petal.rotation.y = angle;
+                petal.castShadow = true;
+                petal.receiveShadow = true;
+                this.scene.add(petal);
+
+                petals.push({
+                    mesh: petal,
+                    baseRotation: petal.rotation.clone(),
+                    phase: Math.random() * Math.PI * 2 + p * 0.35,
+                    speed: 1.0 + Math.random() * 1.0,
+                    amplitude: 0.08 + Math.random() * 0.05
+                });
+            }
+
+            // Flower centre "nectar"
+            const nectarSize = petalRadius * 0.55;
+            const nectarGeometry = new THREE.SphereGeometry(nectarSize, 10, 10);
+            const nectarMaterial = new THREE.MeshStandardMaterial({
+                color: nectarColor,
+                emissive: 0xffa000,
+                emissiveIntensity: 0.22,
+                roughness: 0.5,
+                metalness: 0.05
+            });
+            const nectar = new THREE.Mesh(nectarGeometry, nectarMaterial);
+            nectar.position.set(x, flowerTopY + 0.005, z);
+            nectar.castShadow = true;
+            nectar.receiveShadow = true;
+            this.scene.add(nectar);
+
+            this.flowers.push({
+                stem,
+                nectar,
+                petals,
+                nectarBaseY: nectar.position.y,
+                stemPhase: Math.random() * Math.PI * 2,
+                stemSpeed: 0.45 + Math.random() * 0.4,
+                stemAmplitude: 0.04 + Math.random() * 0.03
+            });
         }
+    }
+
+    easeInOut(t) {
+        if (t < 0.5) return 2 * t * t;
+        return 1 - Math.pow(-2 * t + 2, 2) / 2;
     }
     
     update() {
@@ -773,6 +883,41 @@ export class Environment {
         this.bushes.forEach((bush, index) => {
             const windStrength = Math.sin(time * 0.5 + index) * 0.02;
             bush.rotation.z = windStrength;
+        });
+
+        this.grassPatches.forEach(patch => {
+            const dummy = new THREE.Object3D();
+            patch.blades.forEach((blade, index) => {
+                const sway = Math.sin(time * blade.speed + blade.phase);
+                dummy.position.set(blade.x, blade.y, blade.z);
+                dummy.rotation.y = blade.yaw;
+                dummy.rotation.x = blade.basePitch + sway * blade.ampX;
+                dummy.rotation.z = blade.baseRoll + sway * blade.ampZ;
+                dummy.scale.set(blade.scaleX, blade.scaleY, blade.scaleZ);
+                dummy.updateMatrix();
+                patch.mesh.setMatrixAt(index, dummy.matrix);
+            });
+            patch.mesh.instanceMatrix.needsUpdate = true;
+        });
+
+        this.flowers.forEach(flower => {
+            const stemCycle = (Math.sin(time * flower.stemSpeed + flower.stemPhase) + 1) * 0.5;
+            const stemEase = this.easeInOut(stemCycle);
+            const stemSway = (stemEase * 2 - 1) * flower.stemAmplitude;
+
+            flower.stem.rotation.z = stemSway;
+            flower.stem.rotation.x = stemSway * 0.35;
+            flower.nectar.position.y = flower.nectarBaseY + Math.abs(stemSway) * 0.02;
+
+            flower.petals.forEach(petal => {
+                const petalCycle = (Math.sin(time * petal.speed + petal.phase) + 1) * 0.5;
+                const petalEase = this.easeInOut(petalCycle);
+                const petalSway = (petalEase * 2 - 1) * petal.amplitude;
+
+                petal.mesh.rotation.x = petal.baseRotation.x + petalSway;
+                petal.mesh.rotation.y = petal.baseRotation.y + petalSway * 0.2;
+                petal.mesh.rotation.z = petal.baseRotation.z + petalSway * 0.6;
+            });
         });
     }
 }
