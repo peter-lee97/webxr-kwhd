@@ -25,7 +25,7 @@ export class VoxelOcelot {
             // Per-individual anatomical variation
             this.earSize = 0.9 + Math.random() * 0.7;
             this.earHeight = 1.2 + Math.random() * 0.5;
-            this.tailLength = (1 + Math.random() * 1.2) * this.speciesProfile.tailLengthMod;
+            this.tailLength = (0.65 + Math.random() * 0.725) * this.speciesProfile.tailLengthMod;
             this.tailTaper = 0.78 + Math.random() * 0.14;
             this.tailLift = Math.random();
             this.headWidth = 0.95 + Math.random() * 0.35;
@@ -49,6 +49,7 @@ export class VoxelOcelot {
             this.targetRotation = 0;
             this.jumpProgress = 0;
             this.interactionCooldown = 0;
+            this.sitModelBlend = 0;
 
             // Wand interaction properties
             this.wandFollowTimer = 0;
@@ -278,41 +279,36 @@ export class VoxelOcelot {
         this.bodyParts.tailSegments = [];
 
         const tailVar = this.tailLength;
-        const tailTaper = this.tailTaper;
-        const tailLift = this.tailLift;
-        const tailSegments = Math.floor(7 * (0.7 + tailVar * 0.5));  // 5 – 12 segments
-        const segLen = 0.32 * s * (tailVar * 0.3 + 0.75);
-
+        const totalTailLength = (1.6 + tailVar * 0.9) * s;
+        const tailThickness = 0.32 * s * this.tailTaper;
         const torsoBackX = -1.6 * s * this.bodyLengthVariance;
-        const tailBaseY = 1.5 * s + 0.18 * s;
-
+        const tailBaseY = 0.18 * s;
         const prof = this.speciesProfile;
         const bodyColor = this.getBodyColor();
         const ringColorA = prof.tailRingColors[0];
         const ringColorB = prof.tailRingColors[1] ?? bodyColor;
+        const tailParent = this.bodyParts.torso || this.group;
 
+        // Three-segment cuboid tail with variable total length.
+        const segmentCount = 3;
+        const segmentRatios = [0.40, 0.34, 0.26];
         let cumX = 0;
-        for (let i = 0; i < tailSegments; i++) {
-            const segSize = s * Math.pow(tailTaper, i);
-            const len = segLen * segSize;
-            const thick = 0.35 * segSize;
 
-            // Per-species tail colour pattern
-            const segColor = this.getTailSegmentColor(i, tailSegments, bodyColor, ringColorA, ringColorB);
+        for (let i = 0; i < segmentCount; i++) {
+            const len = totalTailLength * segmentRatios[i];
+            const thickness = tailThickness * (1 - i * 0.14);
+            const segColor = this.getTailSegmentColor(i, segmentCount, bodyColor, ringColorA, ringColorB);
 
-            const tailGeo = new THREE.BoxGeometry(len, thick, thick);
+            const tailGeo = new THREE.BoxGeometry(len, thickness, thickness);
             const tailMat = new THREE.MeshBasicMaterial({color: segColor});
             const segment = new THREE.Mesh(tailGeo, tailMat);
 
             cumX += len;
-            const t = i / tailSegments;
-            const arcY = tailLift * t * t * 1.6 * s;
-
-            segment.position.set(torsoBackX - (cumX - len * 0.5), tailBaseY + arcY, 0);
+            segment.position.set(torsoBackX - (cumX - len * 0.5), tailBaseY, 0);
             segment.castShadow = true;
 
             this.bodyParts.tailSegments.push(segment);
-            this.group.add(segment);
+            tailParent.add(segment);
         }
     }
 
@@ -583,6 +579,12 @@ export class VoxelOcelot {
                 backLeftLeg: this.bodyParts.backLeftLeg?.position.clone(),
                 backRightLeg: this.bodyParts.backRightLeg?.position.clone()
             },
+            legScales: {
+                frontLeftLeg: this.bodyParts.frontLeftLeg?.scale.clone(),
+                frontRightLeg: this.bodyParts.frontRightLeg?.scale.clone(),
+                backLeftLeg: this.bodyParts.backLeftLeg?.scale.clone(),
+                backRightLeg: this.bodyParts.backRightLeg?.scale.clone()
+            },
             tailPositions: (this.bodyParts.tailSegments || []).map(segment => segment.position.clone())
         };
     }
@@ -613,6 +615,8 @@ export class VoxelOcelot {
             if (leg && base) {
                 leg.position.copy(base);
                 leg.rotation.set(0, 0, 0);
+                const baseScale = this.basePose.legScales?.[name];
+                if (baseScale) leg.scale.copy(baseScale);
             }
         });
 
@@ -713,7 +717,7 @@ export class VoxelOcelot {
                 this.currentAction = 'walking';
                 this.targetPosition.set(playerPos.x, this.baseGroupY, playerPos.z);
                 const approachDir = new THREE.Vector3().subVectors(this.targetPosition, this.group.position).normalize();
-                this.targetRotation = Math.atan2(approachDir.x, approachDir.z);
+                this.targetRotation = this.getYawForHeadForward(approachDir);
                 this.moveToTarget();
                 this.smoothRotateToTarget();
 
@@ -730,7 +734,7 @@ export class VoxelOcelot {
                 // Keep facing player
                 if (this.bodyParts.head) {
                     const toPlayer = new THREE.Vector3().subVectors(playerPos, this.group.position).normalize();
-                    const targetHeadY = Math.atan2(toPlayer.x, toPlayer.z) - this.group.rotation.y;
+                    const targetHeadY = this.getYawForHeadForward(toPlayer) - this.group.rotation.y;
                     this.bodyParts.head.rotation.y += (targetHeadY - this.bodyParts.head.rotation.y) * 0.08;
                 }
                 if (this.clingyAttentionTimer <= 0) {
@@ -748,7 +752,7 @@ export class VoxelOcelot {
                         Math.max(-maxBound, Math.min(maxBound, this.group.position.z + Math.sin(awayAngle) * awayDist))
                     );
                     const dir = new THREE.Vector3().subVectors(this.targetPosition, this.group.position).normalize();
-                    this.targetRotation = Math.atan2(dir.x, dir.z);
+                    this.targetRotation = this.getYawForHeadForward(dir);
                     this.currentAction = 'walking';
                     this.actionTimer = 999;
                 }
@@ -792,7 +796,7 @@ export class VoxelOcelot {
                 Math.max(-maxBound, Math.min(maxBound, this.group.position.z + Math.sin(fleeAngle) * fleeDistance))
             );
             const dir = new THREE.Vector3().subVectors(this.targetPosition, this.group.position).normalize();
-            this.targetRotation = Math.atan2(dir.x, dir.z);
+            this.targetRotation = this.getYawForHeadForward(dir);
             this.currentAction = 'walking';
             this.actionTimer = 999;
         }
@@ -845,11 +849,16 @@ export class VoxelOcelot {
         this.bodyParts.torso.scale.multiplyScalar(breatheScale);
 
         if (this.bodyParts.tailSegments && this.bodyParts.tailSegments.length > 0) {
+            const total = this.bodyParts.tailSegments.length;
             this.bodyParts.tailSegments.forEach((segment, index) => {
-                const wave = Math.sin(this.animationTime * 1.8 + index * 0.45) * 0.04;
-                segment.position.y += wave;
+                const t = (index + 1) / total;
+                const swayY = Math.sin(this.animationTime * 1.7 + index * 0.6) * 0.10 * t;
+                const swayX = Math.sin(this.animationTime * 1.3 + index * 0.45) * 0.04 * t;
+                segment.rotation.y = swayY;
+                segment.rotation.x = swayX;
             });
         }
+
     }
 
     applyWalkingAnimation() {
@@ -868,51 +877,53 @@ export class VoxelOcelot {
         }
     }
 
-    applySitAnimation() {
+    applySitAnimation(blend = 1) {
         const s = this.size;
+        const maxHeadTilt = THREE.MathUtils.degToRad(5);
+        const sitT = THREE.MathUtils.clamp(blend, 0, 1);
+        if (sitT <= 0) return;
 
-        // Torso: lower rear end and tilt so haunches are down
+        // Dedicated sitting model: lower body near ground, chest upright.
         if (this.bodyParts.torso) {
-            this.bodyParts.torso.position.y -= 0.38 * s;
-            this.bodyParts.torso.rotation.z = 0.14;   // rear tilts down
+            this.bodyParts.torso.position.y -= 0.46 * s * sitT;
+            this.bodyParts.torso.rotation.z = 0.08 * sitT;
+            this.bodyParts.torso.scale.x *= (1 + 0.03 * sitT);
+            this.bodyParts.torso.scale.y *= (1 - 0.06 * sitT);
         }
 
-        // Head stays elevated (cat sits upright)
+        // Head remains upright with subtle left-right tilt while seated.
         if (this.bodyParts.head) {
-            this.bodyParts.head.position.y -= 0.12 * s;
+            this.bodyParts.head.position.y -= 0.04 * s * sitT;
+            this.bodyParts.head.position.x += 0.06 * s * sitT;
+            this.bodyParts.head.rotation.z = Math.sin(this.animationTime * 1.2) * maxHeadTilt * sitT;
         }
 
-        // Rear haunches fold flat (legs near tail, x < 0, named "front" in code)
-        ['frontLeftLeg', 'frontRightLeg'].forEach(name => {
-            const leg = this.bodyParts[name];
-            const base = this.basePose.legPositions[name];
-            if (leg && base) {
-                leg.position.y = base.y - 0.55 * s;
-                leg.rotation.z = name.includes('Left') ? 0.45 : -0.45;  // splay outward
-            }
-        });
-
-        // Front legs (near head, named "back" in code) stay upright, barely move
+        // Front arms (near head, named "back" in this rig) become longer in sit pose.
         ['backLeftLeg', 'backRightLeg'].forEach(name => {
             const leg = this.bodyParts[name];
             const base = this.basePose.legPositions[name];
             if (leg && base) {
-                leg.position.y = base.y - 0.05 * s;
+                const side = name.includes('Left') ? 1 : -1;
+                leg.scale.y = 1 + 0.48 * sitT;
+                leg.position.y = base.y - 0.22 * s * sitT;
+                leg.position.x = base.x + 0.08 * s * sitT;
+                leg.rotation.z = side * 0.06 * sitT;
             }
         });
 
-        // Tail curls around to the side and forward, tip near front paws
-        if (this.bodyParts.tailSegments) {
-            const total = this.bodyParts.tailSegments.length;
-            this.bodyParts.tailSegments.forEach((segment, i) => {
-                const base = this.basePose.tailPositions[i];
-                if (!base) return;
-                const t = i / total;
-                segment.position.z = base.z + Math.sin(t * Math.PI) * 1.1 * s;  // arc sideways
-                segment.position.x = base.x + t * t * 1.4 * s;                  // curl forward
-                segment.position.y = base.y - t * 0.5 * s;                       // drop toward ground
-            });
-        }
+        // Hind legs (near tail, named "front" in this rig) tuck to lower body to ground.
+        ['frontLeftLeg', 'frontRightLeg'].forEach(name => {
+            const leg = this.bodyParts[name];
+            const base = this.basePose.legPositions[name];
+            if (leg && base) {
+                const side = name.includes('Left') ? 1 : -1;
+                leg.position.y = base.y - 0.34 * s * sitT;
+                leg.position.x = base.x - 0.08 * s * sitT;
+                leg.rotation.z = side * 0.22 * sitT;
+            }
+        });
+
+        // Tail stays as a straight cuboid in sit state.
     }
 
     applyJumpAnimation() {
@@ -955,13 +966,18 @@ export class VoxelOcelot {
         this.animationTime += 0.05;
 
         this.updateActionState(playerPos);
+        if (this.currentAction === 'sit') {
+            this.sitModelBlend = Math.min(1, this.sitModelBlend + 0.12);
+        } else {
+            this.sitModelBlend = 0;
+        }
         this.restoreBasePose();
         this.applyCommonAnimation();
 
         if (this.currentAction === 'walking' || this.currentAction === 'zoomies') {
             this.applyWalkingAnimation();
         } else if (this.currentAction === 'sit') {
-            this.applySitAnimation();
+            this.applySitAnimation(this.sitModelBlend);
         } else if (this.currentAction === 'jump') {
             this.applyJumpAnimation();
         } else if (this.currentAction === 'stretch') {
@@ -1065,7 +1081,7 @@ export class VoxelOcelot {
 
                 // Set target rotation toward laser
                 const direction = new THREE.Vector3().subVectors(this.targetPosition, this.group.position).normalize();
-                this.targetRotation = Math.atan2(direction.x, direction.z);
+                this.targetRotation = this.getYawForHeadForward(direction);
 
                 // Increase chance of playful behavior when very close
                 if (distance < 3 && Math.random() < 0.03) {
@@ -1104,7 +1120,11 @@ export class VoxelOcelot {
         );
 
         const direction = new THREE.Vector3().subVectors(this.targetPosition, this.group.position).normalize();
-        this.targetRotation = Math.atan2(direction.x, direction.z);
+        this.targetRotation = this.getYawForHeadForward(direction);
+    }
+
+    getYawForHeadForward(direction) {
+        return Math.atan2(direction.x, direction.z) - Math.PI / 2;
     }
 
     smoothRotateToTarget() {
@@ -1125,12 +1145,23 @@ export class VoxelOcelot {
     }
 
     moveToTarget() {
-        const direction = new THREE.Vector3().subVectors(this.targetPosition, this.group.position);
-        const distance = direction.length();
+        const toTarget = new THREE.Vector3().subVectors(this.targetPosition, this.group.position);
+        const distance = toTarget.length();
 
         if (distance > 0.1) {
-            direction.normalize().multiplyScalar(this.movementSpeed);
-            const newPosition = this.group.position.clone().add(direction);
+            const targetDir = toTarget.normalize();
+            const forward = new THREE.Vector3(
+                Math.cos(this.group.rotation.y),
+                0,
+                -Math.sin(this.group.rotation.y)
+            );
+            const alignment = THREE.MathUtils.clamp(forward.dot(targetDir), 0, 1);
+
+            // Forward-only locomotion: no strafing/backpedaling while turning.
+            if (alignment < 0.05) return;
+
+            const step = Math.min(distance, this.movementSpeed * alignment);
+            const newPosition = this.group.position.clone().add(forward.multiplyScalar(step));
             this.group.position.copy(newPosition);
         } else {
             this.currentAction = 'idle';
