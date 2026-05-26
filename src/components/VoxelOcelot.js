@@ -50,6 +50,8 @@ export class VoxelOcelot {
             this.jumpProgress = 0;
             this.interactionCooldown = 0;
             this.sitModelBlend = 0;
+            this.isHeld = false;
+            this.heldBy = null;
 
             // Wand interaction properties
             this.wandFollowTimer = 0;
@@ -962,8 +964,36 @@ export class VoxelOcelot {
         }
     }
 
+    setHeld(isHeld, sourceId = null) {
+        this.isHeld = Boolean(isHeld);
+        this.heldBy = this.isHeld ? sourceId : null;
+        this.currentAction = 'idle';
+        this.jumpProgress = 0;
+        this.actionTimer = 60;
+        this.interactionCooldown = 0;
+    }
+
+    setExternalTransform(position, rotation = null) {
+        if (position) {
+            this.group.position.copy(position);
+            this.baseGroupY = this.group.position.y;
+            if (this.targetPosition) {
+                this.targetPosition.y = this.baseGroupY;
+            }
+        }
+        if (rotation) {
+            this.group.quaternion.copy(rotation);
+        }
+    }
+
     animate(playerPos) {
         this.animationTime += 0.05;
+
+        if (this.isHeld) {
+            this.restoreBasePose();
+            this.applyCommonAnimation();
+            return;
+        }
 
         this.updateActionState(playerPos);
         if (this.currentAction === 'sit') {
@@ -990,6 +1020,9 @@ export class VoxelOcelot {
     }
 
     interact(source = 'cursor') {
+        if (this.isHeld) {
+            return {sound: null, action: 'held'};
+        }
         if (this.interactionCooldown > 0) {
             return {sound: null, action: this.currentAction};
         }
@@ -1101,7 +1134,7 @@ export class VoxelOcelot {
 
     getStatus() {
         return {
-            action: this.currentAction
+            action: this.isHeld ? 'held' : this.currentAction
         };
     }
 

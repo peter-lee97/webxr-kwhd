@@ -37,6 +37,8 @@ export class VoxelButterfly {
 
             this.targetPosition = new THREE.Vector3();
             this._toTarget = new THREE.Vector3();
+            this.isHeld = false;
+            this.heldBy = null;
             this.pickNewTarget();
         } catch (error) {
             console.error('Failed to create VoxelButterfly:', error);
@@ -276,6 +278,23 @@ export class VoxelButterfly {
         );
     }
 
+    setHeld(isHeld, sourceId = null) {
+        this.isHeld = Boolean(isHeld);
+        this.heldBy = this.isHeld ? sourceId : null;
+        if (!this.isHeld) {
+            this.pickNewTarget();
+        }
+    }
+
+    setExternalTransform(position, rotation = null) {
+        if (position) {
+            this.group.position.copy(position);
+        }
+        if (rotation) {
+            this.group.quaternion.copy(rotation);
+        }
+    }
+
     // ─── Animation ────────────────────────────────────────────────────────────
 
     animate() {
@@ -289,6 +308,10 @@ export class VoxelButterfly {
         const flap = Math.sin(this.flapPhase) * this.flapAmplitude;
         if (this.bodyParts.wingGroupLeft)  this.bodyParts.wingGroupLeft.rotation.z  = -flap;
         if (this.bodyParts.wingGroupRight) this.bodyParts.wingGroupRight.rotation.z =  flap;
+
+        if (this.isHeld) {
+            return;
+        }
 
         // ── Move toward target ──
         this._toTarget.subVectors(this.targetPosition, this.group.position);

@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 
+const uprightQuaternion = new THREE.Quaternion();
+const uprightEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
 export class VoxelBlackHeadedGrosbeak {
     constructor(options = {}) {
         this.size = options.size || 0.7;
@@ -27,6 +30,8 @@ export class VoxelBlackHeadedGrosbeak {
         this.travelHopBudget = 0;
         this.interactionHopBudget = 0;
         this.idleTimer = 1.2 + Math.random() * 2.6;
+        this.isHeld = false;
+        this.heldBy = null;
 
         this.createBody();
         this.group.position.copy(this.position);
@@ -233,9 +238,46 @@ export class VoxelBlackHeadedGrosbeak {
         this.startTravelHop();
     }
 
+    setHeld(isHeld, sourceId = null) {
+        this.isHeld = Boolean(isHeld);
+        this.heldBy = this.isHeld ? sourceId : null;
+        this.state = 'neutral';
+        this.travelActive = false;
+        this.travelHopBudget = 0;
+        this.interactionHopBudget = 0;
+        this.hopTimer = 0;
+        this.group.rotation.x = 0;
+        this.group.rotation.z = 0;
+    }
+
+    setExternalTransform(position, rotation = null) {
+        if (position) {
+            this.group.position.copy(position);
+            this.baseGroupY = this.group.position.y;
+        }
+        if (rotation) {
+            uprightQuaternion.copy(rotation);
+            uprightEuler.setFromQuaternion(uprightQuaternion, 'YXZ');
+            uprightEuler.x = 0;
+            uprightEuler.z = 0;
+            this.group.setRotationFromEuler(uprightEuler);
+        }
+    }
+
     animate() {
         const dt = 1 / 60;
         this.animationTime += dt;
+
+        if (this.isHeld) {
+            if (this.bodyParts.head) {
+                this.bodyParts.head.rotation.z = Math.sin(this.animationTime * 1.6) * THREE.MathUtils.degToRad(5);
+            }
+            if (this.bodyParts.tail) {
+                this.bodyParts.tail.rotation.x = -0.28 + Math.sin(this.animationTime * 2.2) * 0.08;
+                this.bodyParts.tail.rotation.y = Math.sin(this.animationTime * 1.8) * THREE.MathUtils.degToRad(3);
+            }
+            return;
+        }
 
         if (this.state === 'hopping') {
             this.hopTimer += dt;
@@ -298,6 +340,9 @@ export class VoxelBlackHeadedGrosbeak {
     }
 
     interact() {
+        if (this.isHeld) {
+            return { action: 'held', sound: null };
+        }
         this.travelActive = false;
         this.travelHopBudget = 0;
         this.interactionHopBudget = 1 + Math.floor(Math.random() * 2); // total 2-3 hops
@@ -309,7 +354,7 @@ export class VoxelBlackHeadedGrosbeak {
     getStatus() {
         return {
             species: 'Black-headed Grosbeak',
-            action: this.state
+            action: this.isHeld ? 'held' : this.state
         };
     }
 }

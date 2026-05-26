@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import * as CANNON from 'cannon-es';
 import { createOcelot } from './components/VoxelOcelot.js';
 import { createButterfly } from './components/VoxelButterfly.js';
 import { createBlackHeadedGrosbeak } from './components/VoxelBlackHeadedGrosbeak.js';
@@ -95,11 +96,61 @@ const xrRayDirection = new THREE.Vector3();
 const xrCollisionPadding = 0.4;
 const ocelotMeshes = [];
 const ocelotMeshToEntity = new Map();
+const butterflyMeshes = [];
+const butterflyMeshToEntity = new Map();
 const grosbeakMeshes = [];
 const grosbeakMeshToEntity = new Map();
+const pickableMeshToTarget = new Map();
 const xrControllers = [];
 const xrHands = [];
 const xrInteractionCooldown = new Map();
+let suppressNextClickInteraction = false;
+let physicsWorld = null;
+const entityPhysicsStates = new Map();
+const worldUp = new CANNON.Vec3(0, 1, 0);
+const tmpWorldVec3 = new THREE.Vector3();
+const tmpWorldQuat = new THREE.Quaternion();
+const tmpYawEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const tmpScreenPlaneHit = new THREE.Vector3();
+const tmpControllerPos = new THREE.Vector3();
+const tmpHandPos = new THREE.Vector3();
+const tmpCameraDirection = new THREE.Vector3();
+const velocityScratch = new THREE.Vector3();
+const releaseMotionScratch = new THREE.Vector3();
+const DESKTOP_GRAB_MIN_HOLD_DISTANCE = 1.5;
+const DESKTOP_GRAB_MAX_HOLD_DISTANCE = 20;
+const STILL_RELEASE_LOOKBACK_MS = 120;
+const STILL_RELEASE_MAX_SPEED = 0.65;
+const STILL_RELEASE_MAX_DISPLACEMENT = 0.08;
+const STILL_RELEASE_HORIZONTAL_DAMPING = 0.05;
+const HOLD_TO_DRAG_DELAY_MS = 500;
+const AUTO_RELEASE_HOLD_MS = 3000;
+const HELD_PULSE_DURATION_MS = 240;
+const HELD_PULSE_HEIGHT = 0.12;
+const HELD_SCALE_BOOST = 0.035;
+const HELD_GLOW_OPACITY = 0.24;
+const desktopGrabState = {
+    active: false,
+    sourceId: 'desktop-pointer',
+    target: null,
+    holdDistance: 0,
+    localOffset: new THREE.Vector3(),
+    pointer: { x: 0, y: 0 },
+    history: [],
+    startedAt: 0
+};
+const pendingDesktopInteraction = {
+    active: false,
+    target: null,
+    pointerX: 0,
+    pointerY: 0,
+    holdDistance: 0,
+    localOffset: new THREE.Vector3(),
+    timerId: null
+};
+const xrGrabStates = new Map();
+const pendingXRInteractions = new Map();
+const heldVisualStates = new Map();
 let audioManager;
 let lastInteractionLabel = 'none';
 let standardAnimationFrameId = null;
@@ -140,6 +191,7 @@ let targetLensZoom = 1.0;
 let targetLensVignette = 0.0;
 let wideAngleComposer = null;
 let wideAnglePass = null;
+let heldGlowTexture = null;
 
 function applyLensPreset(index) {
     activeLensIndex = index;
@@ -192,6 +244,29 @@ function updateViewfinderHudHint() {
     hint.textContent = deviceType === 'mobile'
         ? 'Camera button · capture  |  Eye button · cycle lens'
         : 'SPACE · capture  |  C · cycle lens';
+}
+
+function getHeldGlowTexture() {
+    if (heldGlowTexture) return heldGlowTexture;
+
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext('2d');
+    const gradient = context.createRadialGradient(
+        size * 0.5, size * 0.5, size * 0.08,
+        size * 0.5, size * 0.5, size * 0.5
+    );
+    gradient.addColorStop(0, 'rgba(255, 252, 235, 0.9)');
+    gradient.addColorStop(0.35, 'rgba(210, 236, 190, 0.45)');
+    gradient.addColorStop(0.7, 'rgba(150, 190, 120, 0.12)');
+    gradient.addColorStop(1, 'rgba(150, 190, 120, 0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, size, size);
+
+    heldGlowTexture = new THREE.CanvasTexture(canvas);
+    return heldGlowTexture;
 }
 
 function setMobileQuickPanelOpen(isOpen) {
@@ -342,6 +417,7 @@ async function init() {
         return;
     }
     console.log('Scene created successfully');
+    initPhysicsWorld();
     
     scene.background = new THREE.Color(0x87CEEB);
     scene.fog = new THREE.Fog(0x87CEEB, 20, 100); // Sky blue fog to match background
@@ -521,6 +597,12 @@ async function init() {
     });
     
     renderer.xr.addEventListener('sessionend', () => {
+        for (const sourceId of pendingXRInteractions.keys()) {
+            clearPendingXRInteraction(sourceId);
+        }
+        for (const sourceId of xrGrabStates.keys()) {
+            endGrab(sourceId, new THREE.Vector3(0, 0, 0));
+        }
         renderer.setAnimationLoop(null);
         startStandardRenderLoop();
     });
@@ -592,13 +674,13 @@ function updateControlInstructions() {
     const infoElement = document.getElementById('info');
     
     if (deviceType === 'desktop') {
-        spawnInstruction.textContent = 'Click cat to interact';
-        cameraInstruction.textContent = 'Drag to rotate view | Scroll to zoom | Enter VR for hand interaction | C: cycle lens | Space: capture scene';
+        spawnInstruction.textContent = 'Click-and-hold creatures to grab';
+        cameraInstruction.textContent = 'Drag empty space to rotate view | Scroll to zoom | Enter VR to grab with controllers | C: cycle lens | Space: capture scene';
     } else if (deviceType === 'mobile') {
         spawnInstruction.textContent = 'Tap cat to interact';
         cameraInstruction.textContent = 'Drag to rotate · Pinch to zoom';
     } else {
-        spawnInstruction.textContent = 'Point controller ray at a cat and pull trigger to interact';
+        spawnInstruction.textContent = 'Point controller ray at a creature and hold trigger to grab';
         cameraInstruction.textContent = 'Left stick: move · Right stick: look · Right A/B: cycle lens';
     }
     
@@ -634,6 +716,7 @@ function setupXRInteraction() {
         const controller = renderer.xr.getController(i);
         controller.userData.sourceId = `controller-${i + 1}`;
         controller.addEventListener('selectstart', onXRSelectStart);
+        controller.addEventListener('selectend', onXRSelectEnd);
         cameraRig.add(controller);
         xrControllers.push(controller);
         
@@ -680,13 +763,134 @@ function setupControls() {
     }
 }
 
+function beginDesktopGrab(clientX, clientY) {
+    const picked = raycastPickableFromScreen(clientX, clientY);
+    if (!picked) return false;
+
+    const localOffset = new THREE.Vector3();
+    if (picked.hit?.point) {
+        localOffset.copy(picked.hit.point).sub(picked.entity.group.position);
+    }
+    const holdDistance = camera.position.distanceTo(picked.hit?.point || picked.entity.group.position);
+    return beginGrab(picked, desktopGrabState.sourceId, {
+        desktop: true,
+        pointerX: clientX,
+        pointerY: clientY,
+        holdDistance,
+        localOffset
+    });
+}
+
+function clearPendingDesktopInteraction() {
+    if (pendingDesktopInteraction.timerId !== null) {
+        clearTimeout(pendingDesktopInteraction.timerId);
+    }
+    pendingDesktopInteraction.active = false;
+    pendingDesktopInteraction.target = null;
+    pendingDesktopInteraction.timerId = null;
+}
+
+function startPendingDesktopInteraction(clientX, clientY) {
+    const picked = raycastPickableFromScreen(clientX, clientY);
+    if (!picked) return false;
+
+    const localOffset = new THREE.Vector3();
+    if (picked.hit?.point) {
+        localOffset.copy(picked.hit.point).sub(picked.entity.group.position);
+    }
+
+    pendingDesktopInteraction.active = true;
+    pendingDesktopInteraction.target = picked;
+    pendingDesktopInteraction.pointerX = clientX;
+    pendingDesktopInteraction.pointerY = clientY;
+    pendingDesktopInteraction.holdDistance = camera.position.distanceTo(
+        picked.hit?.point || picked.entity.group.position
+    );
+    pendingDesktopInteraction.localOffset.copy(localOffset);
+    pendingDesktopInteraction.timerId = setTimeout(() => {
+        if (!pendingDesktopInteraction.active || !pendingDesktopInteraction.target) return;
+        const target = pendingDesktopInteraction.target;
+        const pointerX = pendingDesktopInteraction.pointerX;
+        const pointerY = pendingDesktopInteraction.pointerY;
+        const holdDistance = pendingDesktopInteraction.holdDistance;
+        const dragOffset = pendingDesktopInteraction.localOffset.clone();
+        clearPendingDesktopInteraction();
+        beginGrab(target, desktopGrabState.sourceId, {
+            desktop: true,
+            pointerX,
+            pointerY,
+            holdDistance,
+            localOffset: dragOffset
+        });
+    }, HOLD_TO_DRAG_DELAY_MS);
+
+    return true;
+}
+
+function clearPendingXRInteraction(sourceId) {
+    const pending = pendingXRInteractions.get(sourceId);
+    if (pending?.timerId) {
+        clearTimeout(pending.timerId);
+    }
+    pendingXRInteractions.delete(sourceId);
+}
+
+function startPendingXRInteraction(controller, picked) {
+    const sourceId = controller.userData.sourceId;
+    const localOffset = new THREE.Vector3(0, -0.05, -0.35);
+
+    const timerId = setTimeout(() => {
+        const pending = pendingXRInteractions.get(sourceId);
+        if (!pending) return;
+        clearPendingXRInteraction(sourceId);
+        beginGrab(pending.target, sourceId, {
+            xrController: pending.controller,
+            localOffset: pending.localOffset.clone()
+        });
+    }, HOLD_TO_DRAG_DELAY_MS);
+
+    pendingXRInteractions.set(sourceId, {
+        controller,
+        target: picked,
+        localOffset,
+        timerId
+    });
+}
+
 function onMouseDown(event) {
+    if (event.button !== 0) return;
+    if (event.target === renderer.domElement && startPendingDesktopInteraction(event.clientX, event.clientY)) {
+        previousMousePosition = { x: event.clientX, y: event.clientY };
+        isDragging = false;
+        hasDragged = false;
+        return;
+    }
+
     isDragging = true;
     hasDragged = false;
     previousMousePosition = { x: event.clientX, y: event.clientY };
 }
 
 function onMouseMove(event) {
+    if (pendingDesktopInteraction.active) {
+        pendingDesktopInteraction.pointerX = event.clientX;
+        pendingDesktopInteraction.pointerY = event.clientY;
+        previousMousePosition = { x: event.clientX, y: event.clientY };
+        return;
+    }
+
+    if (desktopGrabState.active) {
+        desktopGrabState.pointer.x = event.clientX;
+        desktopGrabState.pointer.y = event.clientY;
+        const movedX = event.clientX - previousMousePosition.x;
+        const movedY = event.clientY - previousMousePosition.y;
+        if (Math.abs(movedX) > 3 || Math.abs(movedY) > 3) {
+            desktopGrabState.moved = true;
+        }
+        previousMousePosition = { x: event.clientX, y: event.clientY };
+        return;
+    }
+
     if (!isDragging) return;
     
     const deltaX = event.clientX - previousMousePosition.x;
@@ -706,6 +910,49 @@ function onMouseMove(event) {
 }
 
 function onMouseUp() {
+    if (pendingDesktopInteraction.active) {
+        const target = pendingDesktopInteraction.target;
+        clearPendingDesktopInteraction();
+        suppressNextClickInteraction = true;
+        if (target) {
+            triggerPickableInteraction(target, 'cursor');
+        }
+        return;
+    }
+
+    if (desktopGrabState.active) {
+        const heldMs = performance.now() - (desktopGrabState.startedAt || performance.now());
+        const target = desktopGrabState.target;
+        const shouldTreatAsTap = !desktopGrabState.moved && heldMs < 180;
+        let releaseVelocity = new THREE.Vector3(0, 0.4, 0);
+
+        if (!shouldTreatAsTap) {
+            camera.getWorldDirection(tmpCameraDirection);
+            const fallback = tmpCameraDirection.clone().multiplyScalar(1.2).setY(0.8);
+            releaseVelocity = calculateReleaseVelocity(desktopGrabState.history, fallback)
+                .clampLength(0, 8);
+            releaseVelocity = applyStillReleaseDrop(target, desktopGrabState.history, releaseVelocity);
+            releaseVelocity = applyImmediateReleaseDrop(releaseVelocity);
+        }
+
+        endGrab(desktopGrabState.sourceId, shouldTreatAsTap ? new THREE.Vector3() : releaseVelocity);
+        suppressNextClickInteraction = true;
+        if (shouldTreatAsTap && target) {
+            const state = entityPhysicsStates.get(target.entity);
+            if (state) {
+                state.mode = 'idle';
+                state.body.type = CANNON.Body.KINEMATIC;
+                state.body.updateMassProperties();
+                state.body.velocity.set(0, 0, 0);
+                state.body.angularVelocity.set(0, 0, 0);
+                syncEntityFromPhysicsState(state);
+            }
+            setEntityHeld(target, false, null);
+            triggerPickableInteraction(target, 'cursor');
+        }
+        return;
+    }
+
     isDragging = false;
 }
 
@@ -755,24 +1002,9 @@ function handleMobileTap(clientX, clientY) {
     const el = document.elementFromPoint(clientX, clientY);
     if (el !== renderer.domElement) return;
 
-    mouse.x = (clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(clientY / window.innerHeight) * 2 + 1;
-
-    raycaster.setFromCamera(mouse, camera);
-
-    const grosbeakHits = raycaster.intersectObjects(grosbeakMeshes, false);
-    if (grosbeakHits.length > 0) {
-        const grosbeak = grosbeakMeshToEntity.get(grosbeakHits[0].object);
-        if (grosbeak) {
-            triggerGrosbeakInteraction(grosbeak, 'cursor');
-            return;
-        }
-    }
-
-    const hits = raycaster.intersectObjects(ocelotMeshes, false);
-    if (hits.length > 0) {
-        const ocelot = ocelotMeshToEntity.get(hits[0].object);
-        if (ocelot) triggerOcelotInteraction(ocelot, 'cursor');
+    const target = raycastPickableFromScreen(clientX, clientY);
+    if (target) {
+        triggerPickableInteraction(target, 'cursor');
     }
 }
 
@@ -961,6 +1193,7 @@ function spawnButterfly(x, z) {
         if (butterfly && butterfly.group) {
             butterflies.push(butterfly);
             scene.add(butterfly.group);
+            registerButterflyMeshes(butterfly);
             return butterfly;
         }
     } catch (error) {
@@ -994,21 +1227,546 @@ function spawnGrosbeak(x, z) {
 }
 
 function registerOcelotMeshes(ocelot) {
-    ocelot.group.traverse(child => {
+    registerEntityMeshes(ocelot, 'ocelot', ocelotMeshes, ocelotMeshToEntity);
+}
+
+function registerButterflyMeshes(butterfly) {
+    registerEntityMeshes(butterfly, 'butterfly', butterflyMeshes, butterflyMeshToEntity);
+}
+
+function registerGrosbeakMeshes(grosbeak) {
+    registerEntityMeshes(grosbeak, 'grosbeak', grosbeakMeshes, grosbeakMeshToEntity);
+}
+
+function registerEntityMeshes(entity, type, meshList, meshMap) {
+    entity.group.traverse(child => {
         if (child.isMesh) {
-            ocelotMeshes.push(child);
-            ocelotMeshToEntity.set(child, ocelot);
+            meshList.push(child);
+            meshMap.set(child, entity);
+            pickableMeshToTarget.set(child, { entity, type });
         }
     });
 }
 
-function registerGrosbeakMeshes(grosbeak) {
-    grosbeak.group.traverse(child => {
-        if (child.isMesh) {
-            grosbeakMeshes.push(child);
-            grosbeakMeshToEntity.set(child, grosbeak);
-        }
+function initPhysicsWorld() {
+    physicsWorld = new CANNON.World({
+        gravity: new CANNON.Vec3(0, -9.82, 0)
     });
+    physicsWorld.allowSleep = true;
+    physicsWorld.broadphase = new CANNON.SAPBroadphase(physicsWorld);
+}
+
+function getEntityHoldRadius(target) {
+    const box = new THREE.Box3().setFromObject(target.entity.group);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const largestAxis = Math.max(size.x, size.y, size.z);
+    const defaultRadius = target.type === 'butterfly' ? 0.22 : 0.45;
+    return THREE.MathUtils.clamp((largestAxis || defaultRadius) * 0.36, 0.16, 1.3);
+}
+
+function getHeldVisualState(target) {
+    if (heldVisualStates.has(target.entity)) {
+        return heldVisualStates.get(target.entity);
+    }
+
+    const bounds = new THREE.Box3().setFromObject(target.entity.group);
+    const size = new THREE.Vector3();
+    bounds.getSize(size);
+    const radius = Math.max(size.x, size.z, 0.5);
+    const height = Math.max(size.y, 0.8);
+
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: getHeldGlowTexture(),
+        color: 0xe7f4bf,
+        transparent: true,
+        opacity: HELD_GLOW_OPACITY,
+        depthWrite: false,
+        depthTest: true
+    }));
+    glow.renderOrder = 2;
+    glow.visible = false;
+    scene.add(glow);
+
+    const state = {
+        glow,
+        baseScale: new THREE.Vector3(1, 1, 1),
+        radius,
+        height,
+        startedAt: 0,
+        active: false
+    };
+    heldVisualStates.set(target.entity, state);
+    return state;
+}
+
+function setHeldVisuals(target, isHeld) {
+    if (!scene || !target?.entity?.group) return;
+
+    const state = getHeldVisualState(target);
+    state.active = Boolean(isHeld);
+    state.startedAt = performance.now();
+
+    if (isHeld) {
+        state.baseScale.copy(target.entity.group.scale);
+        state.glow.visible = true;
+    } else {
+        state.glow.visible = false;
+        target.entity.group.scale.copy(state.baseScale);
+    }
+}
+
+function getOrCreatePhysicsState(target) {
+    if (entityPhysicsStates.has(target.entity)) {
+        return entityPhysicsStates.get(target.entity);
+    }
+
+    const radius = getEntityHoldRadius(target);
+    const start = target.entity.group.position;
+    const body = new CANNON.Body({
+        mass: 1,
+        shape: new CANNON.Sphere(radius),
+        position: new CANNON.Vec3(start.x, start.y, start.z)
+    });
+    body.linearDamping = 0.24;
+    body.angularDamping = 0.9;
+    body.allowSleep = true;
+    body.sleepSpeedLimit = 0.1;
+    body.sleepTimeLimit = 0.25;
+    body.type = CANNON.Body.KINEMATIC;
+    body.updateMassProperties();
+    physicsWorld.addBody(body);
+
+    const state = {
+        body,
+        target,
+        mode: 'idle',
+        releaseTimer: 0,
+        heldSince: 0,
+        holdSourceId: null
+    };
+    entityPhysicsStates.set(target.entity, state);
+    return state;
+}
+
+function setEntityHeld(target, isHeld, sourceId = null) {
+    if (typeof target.entity.setHeld === 'function') {
+        target.entity.setHeld(isHeld, sourceId);
+    }
+    setHeldVisuals(target, isHeld);
+}
+
+function applyExternalEntityTransform(target, position, quaternion = null) {
+    if (typeof target.entity.setExternalTransform === 'function') {
+        target.entity.setExternalTransform(position, quaternion);
+        return;
+    }
+    target.entity.group.position.copy(position);
+    if (quaternion) {
+        target.entity.group.quaternion.copy(quaternion);
+    }
+}
+
+function raycastPickableFromScreen(clientX, clientY) {
+    if (!pickableMeshToTarget.size) return null;
+
+    mouse.x = (clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(Array.from(pickableMeshToTarget.keys()), false);
+    if (!intersects.length) return null;
+
+    const hit = intersects[0];
+    const target = pickableMeshToTarget.get(hit.object);
+    if (!target) return null;
+    return { ...target, hit };
+}
+
+function raycastPickableFromXR(sourceObject) {
+    if (!pickableMeshToTarget.size) return null;
+
+    xrDirectionMatrix.identity().extractRotation(sourceObject.matrixWorld);
+    xrRayOrigin.setFromMatrixPosition(sourceObject.matrixWorld);
+    xrRayDirection.set(0, 0, -1).applyMatrix4(xrDirectionMatrix);
+
+    raycaster.ray.origin.copy(xrRayOrigin);
+    raycaster.ray.direction.copy(xrRayDirection).normalize();
+    const intersects = raycaster.intersectObjects(Array.from(pickableMeshToTarget.keys()), false);
+    if (!intersects.length) return null;
+
+    const hit = intersects[0];
+    const target = pickableMeshToTarget.get(hit.object);
+    if (!target) return null;
+    return { ...target, hit };
+}
+
+function recordGrabSample(history, position) {
+    history.push({
+        time: performance.now(),
+        position: position.clone()
+    });
+    if (history.length > 6) {
+        history.shift();
+    }
+}
+
+function calculateReleaseVelocity(history, fallback = new THREE.Vector3()) {
+    if (history.length < 2) {
+        return fallback.clone();
+    }
+    const first = history[0];
+    const last = history[history.length - 1];
+    const dt = Math.max((last.time - first.time) / 1000, 1 / 120);
+    return velocityScratch.subVectors(last.position, first.position).divideScalar(dt);
+}
+
+function isStillRelease(history) {
+    if (!history || history.length < 2) {
+        return false;
+    }
+    const last = history[history.length - 1];
+    const windowStart = last.time - STILL_RELEASE_LOOKBACK_MS;
+    let first = history[0];
+    for (let i = history.length - 2; i >= 0; i -= 1) {
+        if (history[i].time < windowStart) break;
+        first = history[i];
+    }
+
+    const dt = Math.max((last.time - first.time) / 1000, 1 / 120);
+    const displacement = releaseMotionScratch.subVectors(last.position, first.position);
+    const speed = displacement.length() / dt;
+    const horizontalDisplacement = Math.hypot(displacement.x, displacement.z);
+    return speed <= STILL_RELEASE_MAX_SPEED && horizontalDisplacement <= STILL_RELEASE_MAX_DISPLACEMENT;
+}
+
+function applyStillReleaseDrop(target, history, velocity) {
+    if (!target || target.type === 'butterfly' || !isStillRelease(history)) {
+        return velocity;
+    }
+    const adjustedVelocity = velocity.clone();
+    adjustedVelocity.x *= STILL_RELEASE_HORIZONTAL_DAMPING;
+    adjustedVelocity.z *= STILL_RELEASE_HORIZONTAL_DAMPING;
+    if (Math.hypot(adjustedVelocity.x, adjustedVelocity.z) < 0.04) {
+        adjustedVelocity.x = 0;
+        adjustedVelocity.z = 0;
+    }
+    return adjustedVelocity;
+}
+
+function applyImmediateReleaseDrop(velocity) {
+    const adjustedVelocity = velocity.clone();
+    adjustedVelocity.y = Math.min(adjustedVelocity.y, 0);
+    if (adjustedVelocity.y > -0.45) {
+        adjustedVelocity.y = -0.45;
+    }
+    return adjustedVelocity;
+}
+
+function clampDesktopGrabHoldDistance(value) {
+    return THREE.MathUtils.clamp(
+        value,
+        DESKTOP_GRAB_MIN_HOLD_DISTANCE,
+        DESKTOP_GRAB_MAX_HOLD_DISTANCE
+    );
+}
+
+function beginGrab(target, sourceId, options = {}) {
+    if (!target || !physicsWorld) return false;
+
+    const state = getOrCreatePhysicsState(target);
+    state.mode = 'held';
+    state.releaseTimer = 0;
+    state.heldSince = performance.now();
+    state.holdSourceId = sourceId;
+    state.body.type = CANNON.Body.KINEMATIC;
+    state.body.updateMassProperties();
+    state.body.velocity.set(0, 0, 0);
+    state.body.angularVelocity.set(0, 0, 0);
+    state.body.wakeUp();
+    state.body.position.set(
+        target.entity.group.position.x,
+        target.entity.group.position.y,
+        target.entity.group.position.z
+    );
+    state.body.quaternion.set(
+        target.entity.group.quaternion.x,
+        target.entity.group.quaternion.y,
+        target.entity.group.quaternion.z,
+        target.entity.group.quaternion.w
+    );
+    setEntityHeld(target, true, sourceId);
+
+    if (options.desktop) {
+        desktopGrabState.active = true;
+        desktopGrabState.target = target;
+        desktopGrabState.holdDistance = clampDesktopGrabHoldDistance(
+            options.holdDistance ?? camera.position.distanceTo(target.entity.group.position)
+        );
+        desktopGrabState.localOffset.copy(options.localOffset || new THREE.Vector3());
+        desktopGrabState.pointer.x = options.pointerX ?? 0;
+        desktopGrabState.pointer.y = options.pointerY ?? 0;
+        desktopGrabState.history.length = 0;
+        desktopGrabState.startedAt = performance.now();
+        desktopGrabState.moved = false;
+        recordGrabSample(desktopGrabState.history, target.entity.group.position);
+    }
+
+    if (options.xrController) {
+        xrGrabStates.set(sourceId, {
+            target,
+            sourceObject: options.xrController,
+            localOffset: options.localOffset || new THREE.Vector3(),
+            history: [],
+            startedAt: performance.now()
+        });
+    }
+
+    return true;
+}
+
+function endGrab(sourceId, releaseVelocity = null) {
+    let target = null;
+    if (sourceId === desktopGrabState.sourceId) {
+        target = desktopGrabState.target;
+        desktopGrabState.active = false;
+        desktopGrabState.target = null;
+    } else {
+        const xrGrab = xrGrabStates.get(sourceId);
+        if (xrGrab) {
+            target = xrGrab.target;
+            xrGrabStates.delete(sourceId);
+        }
+    }
+
+    if (!target) return null;
+    const state = entityPhysicsStates.get(target.entity);
+    if (!state) return target;
+
+    const velocity = releaseVelocity || new THREE.Vector3();
+    state.mode = 'released';
+    state.releaseTimer = 0.8;
+    state.heldSince = 0;
+    state.holdSourceId = null;
+    state.body.type = CANNON.Body.DYNAMIC;
+    state.body.mass = 1;
+    state.body.updateMassProperties();
+    state.body.velocity.set(velocity.x, velocity.y, velocity.z);
+    state.body.angularVelocity.set(
+        THREE.MathUtils.randFloatSpread(2),
+        THREE.MathUtils.randFloatSpread(2),
+        THREE.MathUtils.randFloatSpread(2)
+    );
+    setEntityHeld(target, true, `${sourceId}-release`);
+    return target;
+}
+
+function syncEntityFromPhysicsState(state) {
+    tmpWorldVec3.set(state.body.position.x, state.body.position.y, state.body.position.z);
+    tmpWorldQuat.set(
+        state.body.quaternion.x,
+        state.body.quaternion.y,
+        state.body.quaternion.z,
+        state.body.quaternion.w
+    );
+    applyExternalEntityTransform(state.target, tmpWorldVec3, tmpWorldQuat);
+}
+
+function completeReleaseHandoff(state) {
+    state.mode = 'idle';
+    state.body.type = CANNON.Body.KINEMATIC;
+    state.body.updateMassProperties();
+    state.body.velocity.set(0, 0, 0);
+    state.body.angularVelocity.set(0, 0, 0);
+    setEntityHeld(state.target, false, null);
+}
+
+function enforceReleaseUprightOrientation(state) {
+    if (!state || state.target.type === 'butterfly') return;
+
+    tmpWorldQuat.set(
+        state.body.quaternion.x,
+        state.body.quaternion.y,
+        state.body.quaternion.z,
+        state.body.quaternion.w
+    );
+    tmpYawEuler.setFromQuaternion(tmpWorldQuat, 'YXZ');
+    tmpYawEuler.x = 0;
+    tmpYawEuler.z = 0;
+    tmpWorldQuat.setFromEuler(tmpYawEuler);
+
+    state.body.quaternion.set(
+        tmpWorldQuat.x,
+        tmpWorldQuat.y,
+        tmpWorldQuat.z,
+        tmpWorldQuat.w
+    );
+}
+
+function getReleaseSettleY(target, x, z) {
+    const terrainY = getTerrainY(x, z);
+    if (target.type === 'grosbeak') {
+        return terrainY + (target.entity?.groundOffset || 0);
+    }
+    if (target.type === 'butterfly') {
+        return terrainY + 0.12;
+    }
+    return terrainY;
+}
+
+function stepPhysicsAndSync(delta) {
+    if (!physicsWorld) return;
+
+    physicsWorld.step(1 / 60, delta, 3);
+
+    for (const state of entityPhysicsStates.values()) {
+        if (state.mode === 'idle') continue;
+        syncEntityFromPhysicsState(state);
+
+        if (state.mode === 'released') {
+            state.releaseTimer -= delta;
+            const settleY = getReleaseSettleY(state.target, state.body.position.x, state.body.position.z);
+            const nearTerrain = state.body.position.y <= settleY + 0.2;
+            const verticalSpeed = Math.abs(state.body.velocity.y);
+
+            if (state.body.position.y <= settleY) {
+                state.body.position.y = settleY;
+                if (state.body.velocity.y < 0) {
+                    state.body.velocity.y = 0;
+                }
+            }
+
+            if (state.releaseTimer <= 0 && nearTerrain && verticalSpeed < 0.35) {
+                enforceReleaseUprightOrientation(state);
+                syncEntityFromPhysicsState(state);
+                completeReleaseHandoff(state);
+            }
+        }
+    }
+}
+
+function isEntityPhysicsControlled(entity) {
+    const state = entityPhysicsStates.get(entity);
+    return Boolean(state && state.mode !== 'idle');
+}
+
+function getDesktopGrabGroundClearance(target) {
+    if (!target) return 0.08;
+    if (target.type === 'grosbeak') {
+        return target.entity?.groundOffset ?? 0.1;
+    }
+    if (target.type === 'butterfly') {
+        return 0.12;
+    }
+    return 0.08;
+}
+
+function updateDesktopGrab() {
+    if (!desktopGrabState.active || !desktopGrabState.target) return;
+    const clampedHoldDistance = clampDesktopGrabHoldDistance(desktopGrabState.holdDistance);
+    desktopGrabState.holdDistance = clampedHoldDistance;
+
+    mouse.x = (desktopGrabState.pointer.x / window.innerWidth) * 2 - 1;
+    mouse.y = -(desktopGrabState.pointer.y / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    camera.getWorldDirection(tmpCameraDirection);
+    const holdPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+        tmpCameraDirection,
+        tmpWorldVec3.copy(camera.position).addScaledVector(tmpCameraDirection, clampedHoldDistance)
+    );
+
+    if (!raycaster.ray.intersectPlane(holdPlane, tmpScreenPlaneHit)) {
+        tmpScreenPlaneHit.copy(raycaster.ray.origin).addScaledVector(raycaster.ray.direction, clampedHoldDistance);
+    }
+
+    tmpScreenPlaneHit.sub(desktopGrabState.localOffset);
+    const state = entityPhysicsStates.get(desktopGrabState.target.entity);
+    if (!state) return;
+
+    const minY = getTerrainY(tmpScreenPlaneHit.x, tmpScreenPlaneHit.z) + getDesktopGrabGroundClearance(desktopGrabState.target);
+    tmpScreenPlaneHit.y = Math.max(tmpScreenPlaneHit.y, minY);
+
+    state.body.position.set(tmpScreenPlaneHit.x, tmpScreenPlaneHit.y, tmpScreenPlaneHit.z);
+    state.body.quaternion.set(
+        desktopGrabState.target.entity.group.quaternion.x,
+        desktopGrabState.target.entity.group.quaternion.y,
+        desktopGrabState.target.entity.group.quaternion.z,
+        desktopGrabState.target.entity.group.quaternion.w
+    );
+    syncEntityFromPhysicsState(state);
+    recordGrabSample(desktopGrabState.history, tmpScreenPlaneHit);
+}
+
+function updateXRGrabStates() {
+    for (const [sourceId, grab] of xrGrabStates.entries()) {
+        const state = entityPhysicsStates.get(grab.target.entity);
+        if (!state) continue;
+        tmpControllerPos.setFromMatrixPosition(grab.sourceObject.matrixWorld);
+        tmpWorldVec3.copy(tmpControllerPos).add(grab.localOffset);
+        tmpWorldQuat.setFromRotationMatrix(grab.sourceObject.matrixWorld);
+
+        state.body.position.set(tmpWorldVec3.x, tmpWorldVec3.y, tmpWorldVec3.z);
+        state.body.quaternion.set(tmpWorldQuat.x, tmpWorldQuat.y, tmpWorldQuat.z, tmpWorldQuat.w);
+        syncEntityFromPhysicsState(state);
+        recordGrabSample(grab.history, tmpWorldVec3);
+
+        const bodyRay = grab.sourceObject.getObjectByName('controller-ray');
+        if (bodyRay) {
+            bodyRay.material.color.setHex(0xc8ff7a);
+        }
+
+        if (!grab.sourceObject.parent) {
+            xrGrabStates.delete(sourceId);
+            endGrab(sourceId, new THREE.Vector3(0, 0.6, -0.2));
+        }
+    }
+}
+
+function updateHeldVisualStates(time) {
+    for (const [entity, state] of heldVisualStates.entries()) {
+        if (!state.active) continue;
+
+        const elapsed = Math.max(0, time - state.startedAt);
+        const pulseProgress = Math.min(elapsed / HELD_PULSE_DURATION_MS, 1);
+        const pulse = Math.sin(Math.min(pulseProgress, 1) * Math.PI);
+        const settleScale = 1 + HELD_SCALE_BOOST * (0.45 + 0.55 * pulse);
+        const liftOffset = HELD_PULSE_HEIGHT * pulse;
+
+        entity.group.scale.copy(state.baseScale).multiplyScalar(settleScale);
+
+        state.glow.position.set(
+            entity.group.position.x,
+            entity.group.position.y + state.height * 0.5 + liftOffset,
+            entity.group.position.z
+        );
+        state.glow.scale.set(state.radius * 2.8, state.height * 1.8, 1);
+        state.glow.material.opacity = HELD_GLOW_OPACITY + pulse * 0.08;
+    }
+}
+
+function autoReleaseExpiredHolds(time) {
+    for (const state of entityPhysicsStates.values()) {
+        if (state.mode !== 'held' || !state.holdSourceId || !state.heldSince) continue;
+        if (time - state.heldSince >= AUTO_RELEASE_HOLD_MS) {
+            endGrab(
+                state.holdSourceId,
+                applyImmediateReleaseDrop(new THREE.Vector3(0, -0.45, 0))
+            );
+        }
+    }
+}
+
+function triggerPickableInteraction(target, sourceId) {
+    if (!target) return;
+    if (target.type === 'ocelot') {
+        triggerOcelotInteraction(target.entity, sourceId);
+        return;
+    }
+    if (target.type === 'grosbeak') {
+        triggerGrosbeakInteraction(target.entity, sourceId);
+        return;
+    }
+    lastInteractionLabel = `${sourceId}: observed butterfly`;
+    updateDashboard();
 }
 
 function updateDashboard() {
@@ -1076,6 +1834,10 @@ function updateDashboard() {
 }
 
 function onMouseClick(event) {
+    if (suppressNextClickInteraction) {
+        suppressNextClickInteraction = false;
+        return;
+    }
     if (event.target !== renderer.domElement) {
         return;
     }
@@ -1086,27 +1848,10 @@ function onMouseClick(event) {
         return;
     }
     
-    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    
-    raycaster.setFromCamera(mouse, camera);
-
-    const grosbeakHits = raycaster.intersectObjects(grosbeakMeshes, false);
-    if (grosbeakHits.length > 0) {
-        const grosbeak = grosbeakMeshToEntity.get(grosbeakHits[0].object);
-        if (grosbeak) {
-            triggerGrosbeakInteraction(grosbeak, 'cursor');
-            return;
-        }
-    }
-    
-    const ocelotHits = raycaster.intersectObjects(ocelotMeshes, false);
-    if (ocelotHits.length > 0) {
-        const ocelot = ocelotMeshToEntity.get(ocelotHits[0].object);
-        if (ocelot) {
-            triggerOcelotInteraction(ocelot, 'cursor');
-            return;
-        }
+    const target = raycastPickableFromScreen(event.clientX, event.clientY);
+    if (target) {
+        triggerPickableInteraction(target, 'cursor');
+        return;
     }
     
     // Raycast against the environment ground — floor clicks no longer spawn cats
@@ -1212,24 +1957,44 @@ function onWindowResize() {
 
 function onXRSelectStart(event) {
     const controller = event.target;
-    const interactionTarget = raycastOcelotFromXR(controller);
-    
-    if (interactionTarget) {
-        triggerOcelotInteraction(interactionTarget, controller.userData.sourceId);
+    const sourceId = controller.userData.sourceId;
+    const picked = raycastPickableFromXR(controller);
+
+    if (picked) {
+        startPendingXRInteraction(controller, picked);
+        return;
     }
+
+    // Keep legacy trigger semantics when no target is found.
+    lastInteractionLabel = `${sourceId}: no target`;
+    updateDashboard();
 }
 
-function raycastOcelotFromXR(sourceObject) {
-    xrDirectionMatrix.identity().extractRotation(sourceObject.matrixWorld);
-    xrRayOrigin.setFromMatrixPosition(sourceObject.matrixWorld);
-    xrRayDirection.set(0, 0, -1).applyMatrix4(xrDirectionMatrix);
-    
-    raycaster.ray.origin.copy(xrRayOrigin);
-    raycaster.ray.direction.copy(xrRayDirection).normalize();
-    
-    const intersects = raycaster.intersectObjects(ocelotMeshes, false);
-    if (!intersects.length) return null;
-    return ocelotMeshToEntity.get(intersects[0].object) || null;
+function onXRSelectEnd(event) {
+    const controller = event.target;
+    const sourceId = controller.userData.sourceId;
+    const pending = pendingXRInteractions.get(sourceId);
+    if (pending) {
+        clearPendingXRInteraction(sourceId);
+        triggerPickableInteraction(pending.target, sourceId);
+        return;
+    }
+
+    const grab = xrGrabStates.get(sourceId);
+    if (!grab) return;
+
+    const fallback = new THREE.Vector3(0, 1.1, -0.8).applyQuaternion(controller.quaternion);
+    const releaseVelocity = applyStillReleaseDrop(
+        grab.target,
+        grab.history,
+        calculateReleaseVelocity(grab.history, fallback).clampLength(0, 9)
+    );
+    endGrab(sourceId, applyImmediateReleaseDrop(releaseVelocity));
+
+    const ray = controller.getObjectByName('controller-ray');
+    if (ray) {
+        ray.material.color.setHex(0xa0c0a0);
+    }
 }
 
 function handleXRHandInteractions() {
@@ -1241,15 +2006,21 @@ function handleXRHandInteractions() {
         const handJoint = hand.joints?.['index-finger-tip'] || hand.joints?.['middle-finger-tip'];
         if (!handJoint) return;
         
-        const handPos = xrRayOrigin.setFromMatrixPosition(handJoint.matrixWorld);
-        let nearestOcelot = null;
+        const handPos = tmpHandPos.setFromMatrixPosition(handJoint.matrixWorld);
+        let nearestTarget = null;
         let nearestDistance = Number.POSITIVE_INFINITY;
-        
-        ocelots.forEach(ocelot => {
-            const distance = handPos.distanceTo(ocelot.group.position);
+
+        const candidates = [
+            ...ocelots.map(entity => ({ entity, type: 'ocelot' })),
+            ...grosbeaks.map(entity => ({ entity, type: 'grosbeak' })),
+            ...butterflies.map(entity => ({ entity, type: 'butterfly' }))
+        ];
+        candidates.forEach(target => {
+            if (target.entity.isHeld) return;
+            const distance = handPos.distanceTo(target.entity.group.position);
             if (distance < nearestDistance) {
                 nearestDistance = distance;
-                nearestOcelot = ocelot;
+                nearestTarget = target;
             }
         });
         
@@ -1257,8 +2028,8 @@ function handleXRHandInteractions() {
         const lastHit = xrInteractionCooldown.get(sourceId) || 0;
         const cooldownMs = 700;
         
-        if (nearestOcelot && nearestDistance < 1.3 && now - lastHit > cooldownMs) {
-            triggerOcelotInteraction(nearestOcelot, sourceId);
+        if (nearestTarget && nearestDistance < 1.3 && now - lastHit > cooldownMs) {
+            triggerPickableInteraction(nearestTarget, sourceId);
             xrInteractionCooldown.set(sourceId, now);
         }
     });
@@ -1347,22 +2118,36 @@ function renderFrame(time = performance.now()) {
     try {
         const delta = Math.min((time - lastFrameTime) / 1000, 0.1);
         lastFrameTime = time;
-        
+
+        handleXRLocomotion(delta);
+        autoReleaseExpiredHolds(time);
+        updateXRGrabStates();
+        updateDesktopGrab();
+        stepPhysicsAndSync(delta);
+        updateHeldVisualStates(time);
+
         ocelots.forEach(ocelot => {
-            const groundY = getTerrainY(ocelot.group.position.x, ocelot.group.position.z);
-            ocelot.baseGroupY = groundY;
-            if (ocelot.targetPosition) {
-                ocelot.targetPosition.y = groundY;
+            const physicsControlled = isEntityPhysicsControlled(ocelot);
+            let groundY = ocelot.baseGroupY;
+            if (!physicsControlled) {
+                groundY = getTerrainY(ocelot.group.position.x, ocelot.group.position.z);
+                ocelot.baseGroupY = groundY;
+                if (ocelot.targetPosition) {
+                    ocelot.targetPosition.y = groundY;
+                }
             }
             ocelot.animate();
-            if (ocelot.currentAction !== 'jump') {
+            if (!physicsControlled && ocelot.currentAction !== 'jump') {
                 ocelot.group.position.y = groundY;
             }
         });
 
         grosbeaks.forEach(grosbeak => {
-            const groundY = getTerrainY(grosbeak.group.position.x, grosbeak.group.position.z);
-            grosbeak.baseGroupY = groundY + (grosbeak.groundOffset || 0);
+            const physicsControlled = isEntityPhysicsControlled(grosbeak);
+            if (!physicsControlled) {
+                const groundY = getTerrainY(grosbeak.group.position.x, grosbeak.group.position.z);
+                grosbeak.baseGroupY = groundY + (grosbeak.groundOffset || 0);
+            }
             grosbeak.animate();
         });
         
@@ -1374,8 +2159,7 @@ function renderFrame(time = performance.now()) {
         if (environment && typeof environment.update === 'function') {
             environment.update();
         }
-        
-        handleXRLocomotion(delta);
+
         handleXRHandInteractions();
 
         if (joystickState.active) {
