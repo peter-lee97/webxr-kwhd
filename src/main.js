@@ -14,6 +14,7 @@ import {
 import { AudioManager } from './audio/AudioManager.js';
 import { Environment } from './components/Environment.js';
 import { ControlsPopup } from './components/ControlsPopup.js';
+import { AnimalCatalogOverlay } from './components/AnimalCatalogOverlay.js';
 
 
 let scene, camera, renderer, cameraRig;
@@ -37,6 +38,7 @@ const BLUE_CROWNED_HANGING_PARROT_SIZE = GROSBEAK_SIZE * 0.82;
 let currentRenderer = null;
 let rendererType = 'unknown';
 let controlsPopup = null;
+let animalCatalogOverlay = null;
 let dashboardCollapsed = true;
 
 // VR locomotion constants
@@ -137,6 +139,112 @@ let vrLensOverlayContext = null;
 let vrLensOverlayVisibleUntil = 0;
 const vrLensOverlayPosition = new THREE.Vector3();
 const vrLensOverlayForward = new THREE.Vector3();
+const vrLensOverlayQuaternion = new THREE.Quaternion();
+const vrLensOverlayScale = new THREE.Vector3();
+
+function createAnimalCatalogItems() {
+    const catalogCatPreviewSize = 0.3;
+    const makeButterflyPreview = (speciesType) => {
+        const butterfly = createButterfly({
+            position: new THREE.Vector3(0, 0, 0),
+            boundarySize: 12,
+            size: 0.52,
+            speciesType
+        });
+        butterfly.setHeld(true, 'catalog');
+        butterfly.catalogShouldAnimate = true;
+        butterfly.group.position.set(0, 0.15, 0);
+        return butterfly;
+    };
+
+    return [
+        {
+            id: 'ocelot',
+            name: 'Ocelot',
+            createPreview: () => createOcelot({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, speciesType: 0, size: catalogCatPreviewSize, action: 'idle' })
+        },
+        {
+            id: 'snow-leopard',
+            name: 'Snow Leopard',
+            createPreview: () => createOcelot({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, speciesType: 1, size: catalogCatPreviewSize, action: 'idle' })
+        },
+        {
+            id: 'cheetah',
+            name: 'Cheetah',
+            createPreview: () => createOcelot({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, speciesType: 2, size: catalogCatPreviewSize, action: 'idle' })
+        },
+        {
+            id: 'serval',
+            name: 'Serval',
+            createPreview: () => createOcelot({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, speciesType: 3, size: catalogCatPreviewSize, action: 'idle' })
+        },
+        {
+            id: 'bengal',
+            name: 'Bengal',
+            createPreview: () => createOcelot({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, speciesType: 4, size: catalogCatPreviewSize, action: 'idle' })
+        },
+        {
+            id: 'tuxedo',
+            name: 'Tuxedo',
+            createPreview: () => createOcelot({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, speciesType: 5, size: catalogCatPreviewSize, action: 'idle' })
+        },
+        {
+            id: 'siamese',
+            name: 'Siamese',
+            createPreview: () => createOcelot({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, speciesType: 6, size: catalogCatPreviewSize, action: 'idle' })
+        },
+        {
+            id: 'savannah',
+            name: 'Savannah',
+            createPreview: () => createOcelot({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, speciesType: 7, size: catalogCatPreviewSize, action: 'idle' })
+        },
+        {
+            id: 'monarch-butterfly',
+            name: 'Monarch Butterfly',
+            createPreview: () => makeButterflyPreview(0)
+        },
+        {
+            id: 'blue-morpho-butterfly',
+            name: 'Blue Morpho Butterfly',
+            createPreview: () => makeButterflyPreview(1)
+        },
+        {
+            id: 'swallowtail-butterfly',
+            name: 'Swallowtail Butterfly',
+            createPreview: () => makeButterflyPreview(2)
+        },
+        {
+            id: 'cabbage-white-butterfly',
+            name: 'Cabbage White Butterfly',
+            createPreview: () => makeButterflyPreview(3)
+        },
+        {
+            id: 'red-admiral-butterfly',
+            name: 'Red Admiral Butterfly',
+            createPreview: () => makeButterflyPreview(4)
+        },
+        {
+            id: 'grosbeak',
+            name: 'Black-headed Grosbeak',
+            createPreview: () => createBlackHeadedGrosbeak({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, size: GROSBEAK_SIZE * 1.1, roaming: false })
+        },
+        {
+            id: 'western-tanager',
+            name: 'Western Tanager',
+            createPreview: () => createWesternTanager({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, size: WESTERN_TANAGER_SIZE * 1.15, roaming: false })
+        },
+        {
+            id: 'black-naped-oriole',
+            name: 'Black-naped Oriole',
+            createPreview: () => createBlackNapedOriole({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, size: BLACK_NAPED_ORIOLE_SIZE * 1.1, roaming: false })
+        },
+        {
+            id: 'blue-crowned-hanging-parrot',
+            name: 'Blue-crowned Hanging Parrot',
+            createPreview: () => createBlueCrownedHangingParrot({ position: new THREE.Vector3(0, 0, 0), boundarySize: 12, size: BLUE_CROWNED_HANGING_PARROT_SIZE * 1.25, roaming: false })
+        }
+    ];
+}
 
 // Lens presets: FOV-based only (compatible with both desktop and VR)
 const DEFAULT_FOV = 75;
@@ -256,15 +364,16 @@ function updateVRLensOverlay(time = performance.now()) {
     if (!visible) return;
 
     const xrCamera = renderer.xr.getCamera(camera);
-    if (!xrCamera) return;
+    const poseCamera = xrCamera || camera;
+    if (!poseCamera) return;
 
-    xrCamera.getWorldPosition(vrLensOverlayPosition);
-    xrCamera.getWorldDirection(vrLensOverlayForward);
-    vrLensOverlayPosition.addScaledVector(vrLensOverlayForward, 1.3);
-    vrLensOverlayPosition.y -= 0.12;
+    poseCamera.updateMatrixWorld(true);
+    poseCamera.matrixWorld.decompose(vrLensOverlayPosition, vrLensOverlayQuaternion, vrLensOverlayScale);
+    vrLensOverlayForward.set(0, -0.12, -1.3).applyQuaternion(vrLensOverlayQuaternion);
+    vrLensOverlayPosition.add(vrLensOverlayForward);
 
     vrLensOverlaySprite.position.copy(vrLensOverlayPosition);
-    vrLensOverlaySprite.quaternion.copy(xrCamera.quaternion);
+    vrLensOverlaySprite.quaternion.copy(vrLensOverlayQuaternion);
 }
 
 function showLensOverlayTemporarily() {
@@ -321,12 +430,22 @@ function toggleViewfinder() {
     cycleLensMode();
 }
 
+function toggleAnimalCatalog() {
+    if (!animalCatalogOverlay) return;
+    if (renderer?.xr?.isPresenting) {
+        animalCatalogOverlay.toggleVRBoard();
+        return;
+    }
+    animalCatalogOverlay.toggle();
+    syncMobileHud();
+}
+
 function updateViewfinderHudHint() {
     const hint = document.getElementById('vf-hud-hint');
     if (!hint) return;
 
     if (renderer?.xr?.isPresenting) {
-        hint.textContent = 'A · capture  |  Y · cycle lens';
+        hint.textContent = 'A · capture  |  B · cycle lens  |  Y · catalog';
     } else if (deviceType === 'mobile') {
         hint.textContent = 'Camera button · capture  |  Eye button · cycle lens';
     } else {
@@ -385,8 +504,13 @@ function getHeldScaleMultiplier(targetType) {
 }
 
 function syncMobileHud() {
+    const catalogButton = document.getElementById('mob-catalog');
     const viewfinderButton = document.getElementById('mob-viewfinder');
     const captureButton = document.getElementById('mob-capture');
+
+    if (catalogButton) {
+        catalogButton.classList.toggle('active', Boolean(animalCatalogOverlay?.isVisible));
+    }
 
     if (viewfinderButton) {
         viewfinderButton.classList.toggle('active', cameraViewfinderActive);
@@ -545,6 +669,8 @@ async function init() {
     if (deviceType === 'desktop') {
         const controlsToggle = document.getElementById('controls-toggle');
         controlsToggle.classList.add('visible');
+        const catalogToggle = document.getElementById('catalog-toggle');
+        catalogToggle.classList.add('visible');
     } else if (deviceType === 'mobile') {
         setupMobileControls();
         setupOrientationHandler();
@@ -667,6 +793,10 @@ async function init() {
             controlsPopup.show();
         }
     });
+
+    document.getElementById('catalog-toggle').addEventListener('click', () => {
+        toggleAnimalCatalog();
+    });
     
     // Initialize dashboard to collapsed state
     initializeDashboard();
@@ -744,6 +874,13 @@ async function init() {
     console.log(`Spawned ${tanagerCount} western tanagers`);
     console.log(`Spawned ${orioleCount} black-naped orioles`);
     console.log(`Spawned ${hangingParrotCount} blue-crowned hanging parrots`);
+
+    animalCatalogOverlay = new AnimalCatalogOverlay({
+        scene,
+        renderer,
+        camera,
+        items: createAnimalCatalogItems()
+    });
     
     updateControlInstructions();
     updateDashboard();
@@ -755,6 +892,7 @@ async function init() {
         stopStandardRenderLoop();
         renderer.setAnimationLoop(renderFrame);
         ensureVRLensOverlay();
+        animalCatalogOverlay?.hide();
         updateViewfinderHudHint();
     });
     
@@ -764,6 +902,7 @@ async function init() {
         if (vrLensOverlaySprite) {
             vrLensOverlaySprite.visible = false;
         }
+        animalCatalogOverlay?.hideVRBoard();
         updateViewfinderHudHint();
     });
     
@@ -837,13 +976,13 @@ function updateControlInstructions() {
     
     if (deviceType === 'desktop') {
         spawnInstruction.textContent = 'Click creatures to interact';
-        cameraInstruction.textContent = 'Drag empty space to rotate view | Scroll to zoom | Enter VR to interact with controllers | C: cycle lens | Space: capture scene';
+        cameraInstruction.textContent = 'Drag empty space to rotate view | Scroll to zoom | C: cycle lens | Space: capture scene | Catalog button: species viewer';
     } else if (deviceType === 'mobile') {
         spawnInstruction.textContent = 'Tap cat to interact';
-        cameraInstruction.textContent = 'Drag to rotate · Pinch to zoom';
+        cameraInstruction.textContent = 'Drag to rotate · Pinch to zoom · Grid button: species viewer';
     } else {
         spawnInstruction.textContent = 'Point controller ray at a creature and press trigger to interact';
-        cameraInstruction.textContent = 'Left stick: move · Right stick: look · Y: cycle lens · A: capture';
+        cameraInstruction.textContent = 'Left stick: move · Right stick: look · B: cycle lens · Y: catalog · A: capture';
     }
     
     if (infoElement && !document.getElementById('f1-hint') && deviceType !== 'mobile') {
@@ -907,6 +1046,8 @@ function setupXRInteraction() {
     // Show controls button when XR is available
     const controlsToggle = document.getElementById('controls-toggle');
     controlsToggle.classList.add('visible');
+    const catalogToggle = document.getElementById('catalog-toggle');
+    catalogToggle.classList.add('visible');
 }
 
 function setupControls() {
@@ -1073,6 +1214,7 @@ function handleMobileTap(clientX, clientY) {
 }
 
 function setupMobileControls() {
+    const mobCatalog = document.getElementById('mob-catalog');
     const mobViewfinder = document.getElementById('mob-viewfinder');
     const mobCapture = document.getElementById('mob-capture');
     const mobPanelToggle = document.getElementById('mob-panel-toggle');
@@ -1082,6 +1224,12 @@ function setupMobileControls() {
     const mobileAudioToggle = document.getElementById('mobile-audio-toggle');
     const mobileControlsGuide = document.getElementById('mobile-controls-guide');
     const audioToggle = document.getElementById('audio-toggle');
+
+    mobCatalog.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleAnimalCatalog();
+    });
 
     mobViewfinder.addEventListener('click', (event) => {
         event.preventDefault();
@@ -2299,12 +2447,18 @@ function handleXRLocomotion(delta) {
                     xrInteractionCooldown.set('xr-capture', true);
                     setTimeout(() => xrInteractionCooldown.delete('xr-capture'), 400);
                 }
-            } else if (source.handedness === 'left') {
-                // Y (buttons[5]): cycle through lens presets; wraps back to OFF
-                if (buttons[5]?.pressed && !xrInteractionCooldown.get('xr-viewfinder-toggle')) {
+                // B (buttons[5]): cycle through lens presets; wraps back to OFF
+                if (buttons[5]?.pressed && !xrInteractionCooldown.get('xr-lens-cycle')) {
                     cycleLensMode();
-                    xrInteractionCooldown.set('xr-viewfinder-toggle', true);
-                    setTimeout(() => xrInteractionCooldown.delete('xr-viewfinder-toggle'), 400);
+                    xrInteractionCooldown.set('xr-lens-cycle', true);
+                    setTimeout(() => xrInteractionCooldown.delete('xr-lens-cycle'), 400);
+                }
+            } else if (source.handedness === 'left') {
+                // Y (buttons[5]): toggle animal catalog board in VR
+                if (buttons[5]?.pressed && !xrInteractionCooldown.get('xr-catalog-toggle')) {
+                    animalCatalogOverlay?.toggleVRBoard();
+                    xrInteractionCooldown.set('xr-catalog-toggle', true);
+                    setTimeout(() => xrInteractionCooldown.delete('xr-catalog-toggle'), 400);
                 }
             }
         }
@@ -2390,6 +2544,12 @@ function renderFrame(time = performance.now()) {
         }
 
         updateVRLensOverlay(time);
+        animalCatalogOverlay?.update(
+            delta,
+            time,
+            renderer.xr.isPresenting ? renderer.xr.getCamera(camera) : camera,
+            renderer.xr.isPresenting
+        );
         applyXRLensProjectionOverride();
         renderer.render(scene, camera);
     } catch (error) {

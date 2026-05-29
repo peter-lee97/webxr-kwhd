@@ -38,6 +38,10 @@ export class ControlsPopup {
                         <div class="control-desc">Capture scene (in viewfinder)</div>
                     </div>
                     <div class="control-item">
+                        <div class="control-key">Catalog</div>
+                        <div class="control-desc">Open animal species viewer</div>
+                    </div>
+                    <div class="control-item">
                         <div class="control-key">← → ↑ ↓</div>
                         <div class="control-desc">Rotate/zoom camera</div>
                     </div>
@@ -69,6 +73,10 @@ export class ControlsPopup {
                         <div class="control-desc">Capture while viewfinder is active</div>
                     </div>
                     <div class="control-item">
+                        <div class="control-key">Grid</div>
+                        <div class="control-desc">Open species catalog</div>
+                    </div>
+                    <div class="control-item">
                         <div class="control-key">Menu</div>
                         <div class="control-desc">Open the mobile field guide and utility controls</div>
                     </div>
@@ -81,11 +89,15 @@ export class ControlsPopup {
                     </div>
                     <div class="control-item">
                         <div class="control-key">Y Button</div>
-                        <div class="control-desc">Cycle lens mode</div>
+                        <div class="control-desc">Toggle species catalog board</div>
                     </div>
                     <div class="control-item">
                         <div class="control-key">A Button</div>
                         <div class="control-desc">Capture scene</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">B Button</div>
+                        <div class="control-desc">Cycle lens mode</div>
                     </div>
                     <div class="control-item">
                         <div class="control-key">Left Stick</div>
