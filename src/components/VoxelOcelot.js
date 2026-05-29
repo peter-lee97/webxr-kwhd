@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+const uprightEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
 export class VoxelOcelot {
     constructor(options = {}) {
         try {
@@ -11,16 +13,19 @@ export class VoxelOcelot {
             this.bodyParts = {};
             this.animationTime = Math.random() * Math.PI * 2;
 
-            // Species determines the overall look — 0=Ocelot 1=Snow Leopard 2=Cheetah 3=Serval 4=Bengal
+            const speciesProfiles = VoxelOcelot.getSpeciesProfiles();
+            // Species determines the overall look.
             this.speciesType = options.speciesType !== undefined
                 ? options.speciesType
-                : Math.floor(Math.random() * 5);
-            this.speciesProfile = VoxelOcelot.getSpeciesProfiles()[this.speciesType];
+                : Math.floor(Math.random() * speciesProfiles.length);
+            this.speciesProfile = speciesProfiles[this.speciesType] || speciesProfiles[0];
 
             // Pattern index selects within the species colour palette
             this.pattern = options.pattern !== undefined
                 ? options.pattern
                 : Math.floor(Math.random() * this.speciesProfile.bodyColors.length);
+            this.isTuxedo = this.speciesProfile.id === 'tuxedo';
+            this.tuxedoPattern = this.isTuxedo ? this.generateTuxedoPattern() : null;
 
             // Per-individual anatomical variation
             this.earSize = 0.9 + Math.random() * 0.7;
@@ -359,6 +364,11 @@ export class VoxelOcelot {
         const head = this.bodyParts.headMesh;
         const snout = this.bodyParts.snout;
 
+        if (this.isTuxedo) {
+            this.applyTuxedoMarkings(baseColor);
+            return;
+        }
+
         if (prof.spotStyle === 'striped') {
             // Serval: dorsal stripes along body + spots on head
             const stripes = 3 + Math.floor(Math.random() * 3);
@@ -383,6 +393,123 @@ export class VoxelOcelot {
                 this.addSpotsToMesh(snout, Math.ceil(spotCount * 0.15), baseColor, spotColor, accentColor, spotRadius * 0.5);
             }
         }
+    }
+
+    generateTuxedoPattern() {
+        return {
+            chestStart: 0.42 + Math.random() * 0.2,
+            chestWidth: 0.18 + Math.random() * 0.22,
+            chestHeight: 0.62 + Math.random() * 0.25,
+            blazeWidth: 0.06 + Math.random() * 0.11,
+            blazeHeight: 0.35 + Math.random() * 0.45,
+            muzzleWhiteness: 0.65 + Math.random() * 0.35,
+            tailTipChance: 0.2 + Math.random() * 0.45,
+            sockChance: 0.45 + Math.random() * 0.4
+        };
+    }
+
+    applyTuxedoMarkings(baseColor) {
+        const pattern = this.tuxedoPattern || this.generateTuxedoPattern();
+        const whiteColor = this.getBellyColor();
+        const torso = this.bodyParts.torso;
+        const head = this.bodyParts.headMesh;
+        const snout = this.bodyParts.snout;
+
+            if (torso?.geometry) {
+                this.addMaskToMesh(
+                    torso,
+                    baseColor,
+                    whiteColor,
+                    (x, y, z, bounds) => {
+                        const nx = (x - bounds.min.x) / (bounds.max.x - bounds.min.x);
+                        const ny = (y - bounds.min.y) / (bounds.max.y - bounds.min.y);
+                        const nz = Math.abs((z - bounds.centerZ) / ((bounds.max.z - bounds.min.z) * 0.5));
+                        if (nx < pattern.chestStart || ny > pattern.chestHeight || nz > pattern.chestWidth) {
+                            return 0;
+                        }
+                        const frontWeight = THREE.MathUtils.smoothstep(nx, pattern.chestStart, 1);
+                        const centerWeight = 1 - THREE.MathUtils.clamp(nz / pattern.chestWidth, 0, 1);
+                        return Math.min(1, frontWeight * centerWeight * 1.2);
+                    }
+                );
+            }
+
+            if (head?.geometry) {
+                this.addMaskToMesh(
+                    head,
+                    baseColor,
+                    whiteColor,
+                    (x, y, z, bounds) => {
+                        const nx = (x - bounds.min.x) / (bounds.max.x - bounds.min.x);
+                        const ny = (y - bounds.min.y) / (bounds.max.y - bounds.min.y);
+                        const nz = Math.abs((z - bounds.centerZ) / ((bounds.max.z - bounds.min.z) * 0.5));
+                        if (nx < 0.42 || ny < (1 - pattern.blazeHeight) || nz > pattern.blazeWidth) {
+                            return 0;
+                        }
+                        const upperFace = THREE.MathUtils.smoothstep(ny, 1 - pattern.blazeHeight, 1);
+                        const centerWeight = 1 - THREE.MathUtils.clamp(nz / pattern.blazeWidth, 0, 1);
+                        return Math.min(1, upperFace * centerWeight);
+                    }
+                );
+            }
+
+            if (snout?.geometry) {
+                this.addMaskToMesh(
+                    snout,
+                    baseColor,
+                    whiteColor,
+                    (x, y, z, bounds) => {
+                        const ny = (y - bounds.min.y) / (bounds.max.y - bounds.min.y);
+                        const nz = Math.abs((z - bounds.centerZ) / ((bounds.max.z - bounds.min.z) * 0.5));
+                        const centerWeight = 1 - THREE.MathUtils.clamp(nz / 0.95, 0, 1);
+                        const lowerFace = 1 - THREE.MathUtils.clamp((ny - 0.65) / 0.35, 0, 1);
+                        return Math.max(0, centerWeight * lowerFace * pattern.muzzleWhiteness);
+                    }
+                );
+            }
+
+            ['frontLeftLeg', 'frontRightLeg', 'backLeftLeg', 'backRightLeg'].forEach((name) => {
+                const legGroup = this.bodyParts[name];
+                if (!legGroup?.children?.[1]?.material) return;
+                if (Math.random() > pattern.sockChance) return;
+                legGroup.children[1].material.color.setHex(whiteColor);
+            });
+
+        if (this.bodyParts.tailSegments?.length && Math.random() < pattern.tailTipChance) {
+            const tip = this.bodyParts.tailSegments[this.bodyParts.tailSegments.length - 1];
+            if (tip?.material) {
+                tip.material.color.setHex(whiteColor);
+            }
+        }
+    }
+
+    addMaskToMesh(mesh, baseColor, markColor, maskFunction) {
+        const geometry = mesh.geometry;
+        geometry.computeBoundingBox();
+        const bb = geometry.boundingBox;
+        const posAttr = geometry.attributes.position;
+        const baseCol = new THREE.Color(baseColor);
+        const markCol = new THREE.Color(markColor);
+        const colors = [];
+
+            const bounds = {
+                min: bb.min,
+                max: bb.max,
+                centerZ: (bb.min.z + bb.max.z) * 0.5
+            };
+
+            for (let i = 0; i < posAttr.count; i++) {
+                const x = posAttr.getX(i);
+                const y = posAttr.getY(i);
+                const z = posAttr.getZ(i);
+                const blend = THREE.MathUtils.clamp(maskFunction(x, y, z, bounds), 0, 1);
+                const color = baseCol.clone().lerp(markCol, blend);
+                colors.push(color.r, color.g, color.b);
+            }
+
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        mesh.material.vertexColors = true;
+        mesh.material.needsUpdate = true;
     }
 
     addSpotsToMesh(mesh, spotCount, baseColor, spotColor, accentColor, spotRadius = null) {
@@ -562,6 +689,49 @@ export class VoxelOcelot {
                 spotStyle: 'marbled',
                 spotDensityMod: 0.75,
                 spotRadius: 0.55
+            },
+            {   // 5 — Tuxedo: high-contrast black/white bicolor, mostly clean coat
+                id: 'tuxedo',
+                bodyColors: [0x131313, 0x1A1A1A, 0x0E0E0E, 0x202020],
+                earColors: [0xF4E8DA, 0xF6EEE4, 0xEEDCC8],
+                eyeColors: [0xC9C34A, 0x9FD05A, 0x73B8D8, 0xD7C65C],  // yellow/green/blue mix
+                spotColors: [0x0A0A0A, 0x151515],
+                accentColors: [0xFFFFFF, 0xF8F8F8, 0xF2F2F2],
+                bellyColors: [0xFFFFFF, 0xFCFCFC, 0xF4F4F4],
+                tailPattern: 'solid',
+                tailRingColors: [0x141414, 0x141414],
+                tailLengthMod: 1.0,
+                spotStyle: 'solid_spots',
+                spotDensityMod: 0.0,
+                spotRadius: 0.2
+            },
+            {   // 6 — Siamese: warm cream coat with dark points
+                bodyColors: [0xD9C5A2, 0xE2D1B4, 0xCFB996, 0xE7D8BE],
+                earColors: [0x4B3A31, 0x3F2F27, 0x5B473C],
+                eyeColors: [0x5DA8CF, 0x6DB6DA, 0x4F9CC7, 0x7CC0E4],  // blue eyes
+                spotColors: [0x46362C, 0x3A2B22],
+                accentColors: [0x3E3129, 0x4D3D33, 0x2F241E],
+                bellyColors: [0xEFE2CD, 0xF2E7D6, 0xE8D8BD],
+                tailPattern: 'solid',
+                tailRingColors: [0x3F2F27, 0x3F2F27],
+                tailLengthMod: 1.05,
+                spotStyle: 'solid_spots',
+                spotDensityMod: 0.0,
+                spotRadius: 0.2
+            },
+            {   // 7 — Savannah: sandy coat with bold dark spots
+                bodyColors: [0xC89A58, 0xD3A96A, 0xB98A4E, 0xD9B072],
+                earColors: [0xF3D6A8, 0xEBC997, 0xF8E0B8],
+                eyeColors: [0xA8C74E, 0xB8D05A, 0x99B943, 0xC2D967],  // yellow-green
+                spotColors: [0x141414, 0x0B0B0B, 0x1F1F1F],
+                accentColors: [0x2B1B10, 0x362015, 0x24170E],
+                bellyColors: [0xF7E8D0, 0xF2DEC0, 0xFCEED8],
+                tailPattern: 'banded',
+                tailRingColors: [0x181818, 0xC89A58],
+                tailLengthMod: 1.1,
+                spotStyle: 'solid_spots',
+                spotDensityMod: 1.35,
+                spotRadius: 0.27
             }
         ];
     }
@@ -951,9 +1121,10 @@ export class VoxelOcelot {
     }
 
     applyLookAroundAnimation() {
-        if (!this.bodyParts.head) return;
-
         const headTurn = Math.sin(this.animationTime * 1.2) * 0.45;
+        if (this.bodyParts.torso) this.bodyParts.torso.rotation.y = 0;
+
+        if (!this.bodyParts.head) return;
         this.bodyParts.head.rotation.y = headTurn;
 
         if (this.bodyParts.leftEar) {
@@ -971,6 +1142,15 @@ export class VoxelOcelot {
         this.jumpProgress = 0;
         this.actionTimer = 60;
         this.interactionCooldown = 0;
+
+        if (!this.isHeld) {
+            uprightEuler.setFromQuaternion(this.group.quaternion, 'YXZ');
+            this.group.rotation.set(0, uprightEuler.y, 0);
+            this.targetRotation = uprightEuler.y;
+            if (this.targetPosition) {
+                this.targetPosition.y = this.baseGroupY;
+            }
+        }
     }
 
     setExternalTransform(position, rotation = null) {
@@ -1037,100 +1217,6 @@ export class VoxelOcelot {
         return {sound, action: this.currentAction};
     }
 
-    respondToWand(wandPosition) {
-        if (!this.bodyParts.head) return;
-
-        // Calculate distance to wand
-        const distance = this.group.position.distanceTo(wandPosition);
-
-        // If wand is close enough, show interest
-        if (distance < 5) {
-            // Increase interest level
-            this.wandInterestLevel = Math.min(1, this.wandInterestLevel + 0.02);
-
-            // Make the cat look at the wand
-            const direction = new THREE.Vector3().subVectors(wandPosition, this.group.position).normalize();
-            const targetRotation = Math.atan2(direction.x, direction.z);
-
-            // Rotate head toward wand
-            const headDirection = new THREE.Vector3().subVectors(wandPosition, this.bodyParts.head.getWorldPosition(new THREE.Vector3())).normalize();
-            const headTargetRotationY = Math.atan2(headDirection.x, headDirection.z);
-            const headTargetRotationX = -Math.asin(headDirection.y);
-
-            // Apply head rotation with smooth interpolation
-            this.bodyParts.head.rotation.y += (headTargetRotationY - this.bodyParts.head.rotation.y) * 0.1;
-            this.bodyParts.head.rotation.x += (headTargetRotationX - this.bodyParts.head.rotation.x) * 0.1;
-
-            // If wand is very close, trigger special behavior
-            if (distance < 2) {
-                // Increase chance of playful behavior
-                if (Math.random() < 0.02) {
-                    this.currentAction = 'jump';
-                    this.actionTimer = 30;
-                    return 'playful';
-                }
-            }
-        } else {
-            // Decrease interest level when wand is far
-            this.wandInterestLevel = Math.max(0, this.wandInterestLevel - 0.01);
-        }
-
-        return this.wandInterestLevel > 0.5 ? 'interested' : 'neutral';
-    }
-
-    respondToLaserPointer(laserPosition) {
-        if (!this.bodyParts.head) return;
-
-        // Calculate distance to laser pointer
-        const distance = this.group.position.distanceTo(laserPosition);
-
-        // If laser is close enough, show interest
-        if (distance < 10) {
-            // Increase interest level
-            this.laserInterestLevel = Math.min(1, this.laserInterestLevel + 0.03);
-
-            // Make the cat look at the laser
-            const direction = new THREE.Vector3().subVectors(laserPosition, this.group.position).normalize();
-            const targetRotation = Math.atan2(direction.x, direction.z);
-
-            // Rotate head toward laser
-            const headDirection = new THREE.Vector3().subVectors(laserPosition, this.bodyParts.head.getWorldPosition(new THREE.Vector3())).normalize();
-            const headTargetRotationY = Math.atan2(headDirection.x, headDirection.z);
-            const headTargetRotationX = -Math.asin(headDirection.y);
-
-            // Apply head rotation with smooth interpolation
-            this.bodyParts.head.rotation.y += (headTargetRotationY - this.bodyParts.head.rotation.y) * 0.15;
-            this.bodyParts.head.rotation.x += (headTargetRotationX - this.bodyParts.head.rotation.x) * 0.15;
-
-            // If laser is close, make the cat approach it
-            if (distance < 6) {
-                // Set the cat to move toward the laser position
-                this.currentAction = 'walking';
-                this.targetPosition.copy(laserPosition);
-                // Keep the target position within bounds
-                const maxBound = this.boundarySize - 2;
-                this.targetPosition.x = Math.max(-maxBound, Math.min(maxBound, this.targetPosition.x));
-                this.targetPosition.z = Math.max(-maxBound, Math.min(maxBound, this.targetPosition.z));
-
-                // Set target rotation toward laser
-                const direction = new THREE.Vector3().subVectors(this.targetPosition, this.group.position).normalize();
-                this.targetRotation = this.getYawForHeadForward(direction);
-
-                // Increase chance of playful behavior when very close
-                if (distance < 3 && Math.random() < 0.03) {
-                    this.currentAction = 'jump';
-                    this.actionTimer = 30;
-                    return 'playful';
-                }
-            }
-
-            return 'interested';
-        } else {
-            // Decrease interest level when laser is far
-            this.laserInterestLevel = Math.max(0, this.laserInterestLevel - 0.02);
-            return 'neutral';
-        }
-    }
 
     getStatus() {
         return {

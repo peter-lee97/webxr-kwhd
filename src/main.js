@@ -2,67 +2,19 @@ import * as THREE from 'three';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
 import { XRHandModelFactory } from 'three/examples/jsm/webxr/XRHandModelFactory.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import * as CANNON from 'cannon-es';
 import { createOcelot } from './components/VoxelOcelot.js';
 import { createButterfly } from './components/VoxelButterfly.js';
-import { createBlackHeadedGrosbeak } from './components/VoxelBlackHeadedGrosbeak.js';
+import {
+    createBlackHeadedGrosbeak,
+    createWesternTanager,
+    createBlackNapedOriole,
+    createBlueCrownedHangingParrot
+} from './components/VoxelBird.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { Environment } from './components/Environment.js';
 import { ControlsPopup } from './components/ControlsPopup.js';
 
-// Barrel distortion shader simulating a wide-angle (28mm) lens
-const BarrelDistortionShader = {
-    uniforms: {
-        tDiffuse: { value: null },
-        k0: { value: 0.0 },
-        k1: { value: 0.24 },
-        k2: { value: 0.06 },
-        vignette: { value: 0.0 },
-        zoom: { value: 1.0 },
-        strength: { value: 0.0 },
-    },
-    vertexShader: /* glsl */`
-        varying vec2 vUv;
-        void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-    `,
-    fragmentShader: /* glsl */`
-        uniform sampler2D tDiffuse;
-        uniform float k0;
-        uniform float k1;
-        uniform float k2;
-        uniform float vignette;
-        uniform float zoom;
-        uniform float strength;
-        varying vec2 vUv;
-
-        vec2 distort(vec2 uv) {
-            vec2 p = (uv - 0.5) * zoom;
-            float r = length(p);
-            float r2 = dot(p, p);
-            float barrel = 1.0 + strength * (k0 * r + k1 * r2 + k2 * r2 * r2);
-            return p * barrel + 0.5;
-        }
-
-        void main() {
-            vec2 distortedUv = mix(vUv, distort(vUv), strength);
-            vec2 finalUv = clamp(distortedUv, vec2(0.001), vec2(0.999));
-            vec4 color = texture2D(tDiffuse, finalUv);
-
-            vec2 vignetteUv = (vUv - 0.5) * 1.6;
-            float vignetteMask = smoothstep(0.10, 0.85, dot(vignetteUv, vignetteUv));
-            color.rgb *= 1.0 - (vignette * vignetteMask);
-
-            gl_FragColor = color;
-        }
-    `
-};
 
 let scene, camera, renderer, cameraRig;
 let ocelots = [];
@@ -74,6 +26,14 @@ let cameraAngle = 0;
 let cameraRadius = 15;
 let cameraHeight = 8;
 const boundarySize = 45;
+const OCELOT_SIZE = 0.42; // 30% smaller than previous 0.6
+const OCELOT_SIZE_VARIATION_MIN = 0.82;
+const OCELOT_SIZE_VARIATION_MAX = 1.2;
+const GROSBEAK_SIZE = 0.35; // 50% smaller than previous 0.7
+const WESTERN_TANAGER_SIZE_MULTIPLIER = 0.9;
+const WESTERN_TANAGER_SIZE = GROSBEAK_SIZE * WESTERN_TANAGER_SIZE_MULTIPLIER;
+const BLACK_NAPED_ORIOLE_SIZE = GROSBEAK_SIZE * 1.0;
+const BLUE_CROWNED_HANGING_PARROT_SIZE = GROSBEAK_SIZE * 0.82;
 let currentRenderer = null;
 let rendererType = 'unknown';
 let controlsPopup = null;
@@ -102,6 +62,7 @@ const grosbeakMeshes = [];
 const grosbeakMeshToEntity = new Map();
 const pickableMeshToTarget = new Map();
 const xrControllers = [];
+const xrControllerGrips = [];
 const xrHands = [];
 const xrInteractionCooldown = new Map();
 let suppressNextClickInteraction = false;
@@ -123,11 +84,11 @@ const STILL_RELEASE_LOOKBACK_MS = 120;
 const STILL_RELEASE_MAX_SPEED = 0.65;
 const STILL_RELEASE_MAX_DISPLACEMENT = 0.08;
 const STILL_RELEASE_HORIZONTAL_DAMPING = 0.05;
-const HOLD_TO_DRAG_DELAY_MS = 500;
 const AUTO_RELEASE_HOLD_MS = 3000;
 const HELD_PULSE_DURATION_MS = 240;
 const HELD_PULSE_HEIGHT = 0.12;
 const HELD_SCALE_BOOST = 0.035;
+const HELD_VR_CREATURE_SCALE_MULTIPLIER = 0.5;
 const HELD_GLOW_OPACITY = 0.24;
 const desktopGrabState = {
     active: false,
@@ -141,12 +102,7 @@ const desktopGrabState = {
 };
 const pendingDesktopInteraction = {
     active: false,
-    target: null,
-    pointerX: 0,
-    pointerY: 0,
-    holdDistance: 0,
-    localOffset: new THREE.Vector3(),
-    timerId: null
+    target: null
 };
 const xrGrabStates = new Map();
 const pendingXRInteractions = new Map();
@@ -171,27 +127,163 @@ let captureCounter = 0; // For incremental folder naming
 const viewfinderOverlay = document.getElementById('viewfinder-overlay');
 const captureFlash = document.getElementById('capture-flash');
 const lensLabel = document.getElementById('vf-lens-label');
+const lensOverlay = document.getElementById('lens-overlay');
+const lensOverlayText = document.getElementById('lens-overlay-text');
+let lensOverlayHideTimeoutId = null;
+let vrLensOverlaySprite = null;
+let vrLensOverlayTexture = null;
+let vrLensOverlayCanvas = null;
+let vrLensOverlayContext = null;
+let vrLensOverlayVisibleUntil = 0;
+const vrLensOverlayPosition = new THREE.Vector3();
+const vrLensOverlayForward = new THREE.Vector3();
 
-// Lens effect state
-const DEFAULT_FOV = 75; // baseline scene camera when viewfinder is off
+// Lens presets: FOV-based only (compatible with both desktop and VR)
+const DEFAULT_FOV = 75;
 const LENS_PRESETS = [
-    { label: '150MM', fov: 30, strength: 0.0, k0: 0.0, k1: 0.0, k2: 0.0, zoom: 1.0, vignette: 0.0 },
-    { label: '50MM', fov: 75, strength: 0.0, k0: 0.0, k1: 0.0, k2: 0.0, zoom: 1.0, vignette: 0.0 },
-    { label: '24MM', fov: 98, strength: 1.0, k0: 0.02, k1: 0.24, k2: 0.06, zoom: 0.85, vignette: 0.08 },
-    { label: '18MM', fov: 112, strength: 1.4, k0: 0.24, k1: 0.48, k2: 0.18, zoom: 0.67, vignette: 0.26 }
+    { label: '150MM', fov: 30 },
+    { label: '85MM',  fov: 50 },
+    { label: '50MM',  fov: 75 },
+    { label: '35MM',  fov: 90 },
 ];
 let activeLensIndex = -1;
 let targetFov = DEFAULT_FOV;
 let currentFov = DEFAULT_FOV;
-let targetLensStrength = 0.0;
-let targetLensK0 = 0.0;
-let targetLensK1 = 0.0;
-let targetLensK2 = 0.0;
-let targetLensZoom = 1.0;
-let targetLensVignette = 0.0;
-let wideAngleComposer = null;
-let wideAnglePass = null;
 let heldGlowTexture = null;
+const XR_LENS_MIN_SCALE = 0.15;
+const XR_LENS_MAX_SCALE = 2.5;
+
+function getActiveLensProjectionScale() {
+    if (activeLensIndex < 0) {
+        return 1;
+    }
+    const preset = LENS_PRESETS[activeLensIndex];
+    const defaultTan = Math.tan(THREE.MathUtils.degToRad(DEFAULT_FOV * 0.5));
+    const presetTan = Math.tan(THREE.MathUtils.degToRad(preset.fov * 0.5));
+    if (!Number.isFinite(defaultTan) || !Number.isFinite(presetTan) || defaultTan <= 0) {
+        return 1;
+    }
+    return THREE.MathUtils.clamp(presetTan / defaultTan, XR_LENS_MIN_SCALE, XR_LENS_MAX_SCALE);
+}
+
+function applyLensProjectionScaleToMatrix(projectionMatrix, lensScale) {
+    if (!projectionMatrix || !Number.isFinite(lensScale) || Math.abs(lensScale - 1) < 1e-4) {
+        return;
+    }
+    const zoomMultiplier = 1 / lensScale;
+    const elements = projectionMatrix.elements;
+    elements[0] *= zoomMultiplier; // horizontal FOV term
+    elements[5] *= zoomMultiplier; // vertical FOV term
+}
+
+function applyXRLensProjectionOverride() {
+    if (!renderer?.xr?.isPresenting || activeLensIndex < 0) {
+        return;
+    }
+    const xrCamera = renderer.xr.getCamera(camera);
+    if (!xrCamera?.isArrayCamera || !xrCamera.cameras?.length) {
+        return;
+    }
+    const lensScale = getActiveLensProjectionScale();
+    xrCamera.cameras.forEach((eyeCamera) => {
+        applyLensProjectionScaleToMatrix(eyeCamera.projectionMatrix, lensScale);
+        eyeCamera.projectionMatrixInverse.copy(eyeCamera.projectionMatrix).invert();
+    });
+}
+
+function ensureVRLensOverlay() {
+    if (vrLensOverlaySprite || !scene) return;
+
+    vrLensOverlayCanvas = document.createElement('canvas');
+    vrLensOverlayCanvas.width = 1024;
+    vrLensOverlayCanvas.height = 256;
+    vrLensOverlayContext = vrLensOverlayCanvas.getContext('2d');
+    if (!vrLensOverlayContext) return;
+
+    vrLensOverlayTexture = new THREE.CanvasTexture(vrLensOverlayCanvas);
+    if (renderer?.outputColorSpace) {
+        vrLensOverlayTexture.colorSpace = renderer.outputColorSpace;
+    }
+    vrLensOverlayTexture.needsUpdate = true;
+
+    const material = new THREE.SpriteMaterial({
+        map: vrLensOverlayTexture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false
+    });
+    vrLensOverlaySprite = new THREE.Sprite(material);
+    vrLensOverlaySprite.scale.set(1.6, 0.38, 1);
+    vrLensOverlaySprite.renderOrder = 9999;
+    vrLensOverlaySprite.visible = false;
+    scene.add(vrLensOverlaySprite);
+}
+
+function redrawVRLensOverlay(text) {
+    ensureVRLensOverlay();
+    if (!vrLensOverlayContext || !vrLensOverlayCanvas || !vrLensOverlayTexture) return;
+
+    const ctx = vrLensOverlayContext;
+    const width = vrLensOverlayCanvas.width;
+    const height = vrLensOverlayCanvas.height;
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = 'rgba(18, 52, 18, 0.8)';
+    ctx.strokeStyle = 'rgba(42, 106, 42, 0.9)';
+    ctx.lineWidth = 4;
+    ctx.fillRect(8, 8, width - 16, height - 16);
+    ctx.strokeRect(8, 8, width - 16, height - 16);
+
+    ctx.fillStyle = '#d8f0d8';
+    ctx.font = '600 96px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, width / 2, height / 2);
+
+    vrLensOverlayTexture.needsUpdate = true;
+}
+
+function updateVRLensOverlay(time = performance.now()) {
+    if (!renderer?.xr?.isPresenting || !vrLensOverlaySprite) {
+        if (vrLensOverlaySprite) {
+            vrLensOverlaySprite.visible = false;
+        }
+        return;
+    }
+
+    const visible = time <= vrLensOverlayVisibleUntil;
+    vrLensOverlaySprite.visible = visible;
+    if (!visible) return;
+
+    const xrCamera = renderer.xr.getCamera(camera);
+    if (!xrCamera) return;
+
+    xrCamera.getWorldPosition(vrLensOverlayPosition);
+    xrCamera.getWorldDirection(vrLensOverlayForward);
+    vrLensOverlayPosition.addScaledVector(vrLensOverlayForward, 1.3);
+    vrLensOverlayPosition.y -= 0.12;
+
+    vrLensOverlaySprite.position.copy(vrLensOverlayPosition);
+    vrLensOverlaySprite.quaternion.copy(xrCamera.quaternion);
+}
+
+function showLensOverlayTemporarily() {
+    if (!lensOverlay) return;
+
+    lensOverlay.classList.add('is-visible');
+    if (lensOverlayHideTimeoutId) {
+        clearTimeout(lensOverlayHideTimeoutId);
+    }
+    lensOverlayHideTimeoutId = window.setTimeout(() => {
+        lensOverlay.classList.remove('is-visible');
+        lensOverlayHideTimeoutId = null;
+    }, 2000);
+
+    if (renderer?.xr?.isPresenting) {
+        redrawVRLensOverlay(lensOverlayText?.textContent ?? 'Lens: OFF');
+        vrLensOverlayVisibleUntil = performance.now() + 2000;
+    }
+}
 
 function applyLensPreset(index) {
     activeLensIndex = index;
@@ -204,27 +296,19 @@ function applyLensPreset(index) {
 
     if (!cameraViewfinderActive) {
         targetFov = DEFAULT_FOV;
-        targetLensStrength = 0.0;
-        targetLensK0 = 0.0;
-        targetLensK1 = 0.0;
-        targetLensK2 = 0.0;
-        targetLensZoom = 1.0;
-        targetLensVignette = 0.0;
         if (lensLabel) lensLabel.textContent = 'OFF';
+        if (lensOverlayText) lensOverlayText.textContent = 'Lens: OFF';
+        showLensOverlayTemporarily();
         syncMobileHud();
         return;
     }
 
     const preset = LENS_PRESETS[index];
     targetFov = preset.fov;
-    targetLensStrength = preset.strength;
-    targetLensK0 = preset.k0;
-    targetLensK1 = preset.k1;
-    targetLensK2 = preset.k2;
-    targetLensZoom = preset.zoom;
-    targetLensVignette = preset.vignette;
 
     if (lensLabel) lensLabel.textContent = preset.label;
+    if (lensOverlayText) lensOverlayText.textContent = `Lens: ${preset.label}`;
+    showLensOverlayTemporarily();
     syncMobileHud();
 }
 
@@ -241,9 +325,13 @@ function updateViewfinderHudHint() {
     const hint = document.getElementById('vf-hud-hint');
     if (!hint) return;
 
-    hint.textContent = deviceType === 'mobile'
-        ? 'Camera button · capture  |  Eye button · cycle lens'
-        : 'SPACE · capture  |  C · cycle lens';
+    if (renderer?.xr?.isPresenting) {
+        hint.textContent = 'A · capture  |  Y · cycle lens';
+    } else if (deviceType === 'mobile') {
+        hint.textContent = 'Camera button · capture  |  Eye button · cycle lens';
+    } else {
+        hint.textContent = 'SPACE · capture  |  C · cycle lens';
+    }
 }
 
 function getHeldGlowTexture() {
@@ -288,6 +376,14 @@ function setMobileQuickPanelOpen(isOpen) {
     document.body.classList.toggle('mobile-panel-open', mobileQuickPanelOpen);
 }
 
+function getHeldScaleMultiplier(targetType) {
+    const isReducedVRHoldType = targetType === 'ocelot' || targetType === 'grosbeak';
+    if (!isReducedVRHoldType || !renderer?.xr?.isPresenting) {
+        return 1;
+    }
+    return HELD_VR_CREATURE_SCALE_MULTIPLIER;
+}
+
 function syncMobileHud() {
     const viewfinderButton = document.getElementById('mob-viewfinder');
     const captureButton = document.getElementById('mob-capture');
@@ -315,24 +411,6 @@ function syncMobilePanel() {
     }
 }
 
-function initWideAngleLens() {
-    // Only available with WebGL renderer (not WebGPU)
-    if (rendererType !== 'WebGL') return;
-
-    wideAngleComposer = new EffectComposer(renderer);
-    wideAngleComposer.setPixelRatio(window.devicePixelRatio);
-    wideAngleComposer.addPass(new RenderPass(scene, camera));
-
-    wideAnglePass = new ShaderPass(BarrelDistortionShader);
-    wideAnglePass.uniforms.strength.value = 0.0;
-    wideAnglePass.uniforms.k0.value = 0.0;
-    wideAnglePass.uniforms.k1.value = 0.0;
-    wideAnglePass.uniforms.k2.value = 0.0;
-    wideAnglePass.uniforms.vignette.value = 0.0;
-    wideAnglePass.uniforms.zoom.value = 1.0;
-    wideAngleComposer.addPass(wideAnglePass);
-    wideAngleComposer.addPass(new OutputPass());
-}
 
 async function captureScene() {
     captureFlash.style.display = 'block';
@@ -343,13 +421,76 @@ async function captureScene() {
     
     const countEl = document.getElementById('vf-capture-count');
     if (countEl) countEl.textContent = captureCounter.toString().padStart(3, '0');
-    
-    if (cameraViewfinderActive && wideAngleComposer) {
-        wideAngleComposer.render();
+
+    let dataUrl;
+    if (renderer.xr?.isPresenting) {
+        // Capture a single-perspective frame in XR (not side-by-side stereo).
+        const xrCamera = renderer.xr.getCamera(camera);
+        const sourceCamera = xrCamera?.isArrayCamera && xrCamera.cameras.length
+            ? xrCamera.cameras[0] // left eye
+            : xrCamera || camera;
+        const viewport = sourceCamera?.viewport;
+        const w = Math.max(1, Math.floor(viewport?.z || renderer.domElement.width || window.innerWidth));
+        const h = Math.max(1, Math.floor(viewport?.w || renderer.domElement.height || window.innerHeight));
+        const renderTarget = new THREE.WebGLRenderTarget(w, h);
+        renderTarget.texture.colorSpace = renderer.outputColorSpace || THREE.SRGBColorSpace;
+        const pixels = new Uint8Array(w * h * 4);
+        const captureCamera = camera.clone();
+        const wasXrEnabled = renderer.xr.enabled;
+        const hiddenObjects = [...xrControllers, ...xrControllerGrips, ...xrHands];
+        const visibilityState = new Map();
+
+        captureCamera.matrixAutoUpdate = false;
+        captureCamera.matrixWorld.copy(sourceCamera.matrixWorld);
+        captureCamera.matrixWorldInverse.copy(sourceCamera.matrixWorldInverse);
+        captureCamera.projectionMatrix.copy(sourceCamera.projectionMatrix);
+        captureCamera.projectionMatrixInverse.copy(sourceCamera.projectionMatrixInverse);
+        captureCamera.near = sourceCamera.near;
+        captureCamera.far = sourceCamera.far;
+        captureCamera.layers.mask = sourceCamera.layers.mask;
+        if (activeLensIndex >= 0) {
+            applyLensProjectionScaleToMatrix(captureCamera.projectionMatrix, getActiveLensProjectionScale());
+            captureCamera.projectionMatrixInverse.copy(captureCamera.projectionMatrix).invert();
+        }
+
+        renderer.xr.enabled = false;
+        try {
+            hiddenObjects.forEach((obj) => {
+                visibilityState.set(obj, obj.visible);
+                obj.visible = false;
+            });
+            renderer.setRenderTarget(renderTarget);
+            renderer.render(scene, captureCamera);
+            renderer.readRenderTargetPixels(renderTarget, 0, 0, w, h, pixels);
+        } finally {
+            hiddenObjects.forEach((obj) => {
+                const wasVisible = visibilityState.get(obj);
+                obj.visible = wasVisible === undefined ? true : wasVisible;
+            });
+            renderer.setRenderTarget(null);
+            renderer.xr.enabled = wasXrEnabled;
+            renderTarget.dispose();
+        }
+
+        // WebGL pixel rows are bottom-to-top; flip vertically before drawing to canvas.
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = w;
+        tmpCanvas.height = h;
+        const ctx = tmpCanvas.getContext('2d');
+        const imageData = ctx.createImageData(w, h);
+        for (let row = 0; row < h; row++) {
+            const srcRow = h - 1 - row;
+            imageData.data.set(
+                pixels.subarray(srcRow * w * 4, (srcRow + 1) * w * 4),
+                row * w * 4
+            );
+        }
+        ctx.putImageData(imageData, 0, 0);
+        dataUrl = tmpCanvas.toDataURL('image/png');
     } else {
         renderer.render(scene, camera);
+        dataUrl = renderer.domElement.toDataURL('image/png');
     }
-    const dataUrl = renderer.domElement.toDataURL('image/png');
     
     try {
         const res = await fetch('/save-capture', {
@@ -443,9 +584,6 @@ async function init() {
         
         container.appendChild(renderer.domElement);
         console.log('Renderer created successfully');
-
-        // Initialize wide-angle lens post-processing (WebGL only)
-        initWideAngleLens();
     } catch (error) {
         console.error('Failed to initialize renderer:', error);
         displayFatalError(`Failed to initialize renderer: ${error.message}`);
@@ -462,7 +600,8 @@ async function init() {
     // Add VR button with error handling
     try {
         document.body.appendChild(VRButton.createButton(renderer, {
-            optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+            optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'dom-overlay'],
+            domOverlay: { root: document.body }
         }));
     } catch (error) {
         console.warn('Failed to create VR button:', error);
@@ -576,14 +715,35 @@ async function init() {
     }
     console.log(`Spawned ${butterflyCount} butterflies`);
 
-    const grosbeakCount = 2 + Math.floor(Math.random() * 3); // 2-4
-    const grosbeakSpawnHalf = boundarySize / 2 - 5;
+    const grosbeakCount = 4 + Math.floor(Math.random() * 2); // 4-5
+    const tanagerCount = 4 + Math.floor(Math.random() * 2); // 4-5
+    const orioleCount = 4 + Math.floor(Math.random() * 2); // 4-5
+    const hangingParrotCount = 4 + Math.floor(Math.random() * 2); // 4-5
+    const birdSpawnHalf = boundarySize / 2 - 5;
     for (let i = 0; i < grosbeakCount; i++) {
-        const x = THREE.MathUtils.randFloat(-grosbeakSpawnHalf, grosbeakSpawnHalf);
-        const z = THREE.MathUtils.randFloat(-grosbeakSpawnHalf, grosbeakSpawnHalf);
+        const x = THREE.MathUtils.randFloat(-birdSpawnHalf, birdSpawnHalf);
+        const z = THREE.MathUtils.randFloat(-birdSpawnHalf, birdSpawnHalf);
         spawnGrosbeak(x, z);
     }
+    for (let i = 0; i < tanagerCount; i++) {
+        const x = THREE.MathUtils.randFloat(-birdSpawnHalf, birdSpawnHalf);
+        const z = THREE.MathUtils.randFloat(-birdSpawnHalf, birdSpawnHalf);
+        spawnWesternTanager(x, z);
+    }
+    for (let i = 0; i < orioleCount; i++) {
+        const x = THREE.MathUtils.randFloat(-birdSpawnHalf, birdSpawnHalf);
+        const z = THREE.MathUtils.randFloat(-birdSpawnHalf, birdSpawnHalf);
+        spawnBlackNapedOriole(x, z);
+    }
+    for (let i = 0; i < hangingParrotCount; i++) {
+        const x = THREE.MathUtils.randFloat(-birdSpawnHalf, birdSpawnHalf);
+        const z = THREE.MathUtils.randFloat(-birdSpawnHalf, birdSpawnHalf);
+        spawnBlueCrownedHangingParrot(x, z);
+    }
     console.log(`Spawned ${grosbeakCount} grosbeaks`);
+    console.log(`Spawned ${tanagerCount} western tanagers`);
+    console.log(`Spawned ${orioleCount} black-naped orioles`);
+    console.log(`Spawned ${hangingParrotCount} blue-crowned hanging parrots`);
     
     updateControlInstructions();
     updateDashboard();
@@ -594,17 +754,17 @@ async function init() {
     renderer.xr.addEventListener('sessionstart', () => {
         stopStandardRenderLoop();
         renderer.setAnimationLoop(renderFrame);
+        ensureVRLensOverlay();
+        updateViewfinderHudHint();
     });
     
     renderer.xr.addEventListener('sessionend', () => {
-        for (const sourceId of pendingXRInteractions.keys()) {
-            clearPendingXRInteraction(sourceId);
-        }
-        for (const sourceId of xrGrabStates.keys()) {
-            endGrab(sourceId, new THREE.Vector3(0, 0, 0));
-        }
         renderer.setAnimationLoop(null);
         startStandardRenderLoop();
+        if (vrLensOverlaySprite) {
+            vrLensOverlaySprite.visible = false;
+        }
+        updateViewfinderHudHint();
     });
     
     console.log('Initialization complete');
@@ -643,7 +803,8 @@ async function initializeRenderer() {
             if (adapter) {
                 const renderer = new THREE.WebGPURenderer({
                     antialias: true,
-                    xrCompatible: true
+                    xrCompatible: true,
+                    preserveDrawingBuffer: true
                 });
                 console.log('✓ WebGPU renderer initialized');
                 rendererType = 'WebGPU';
@@ -657,7 +818,8 @@ async function initializeRenderer() {
     // Fallback to WebGL
     try {
         const renderer = new THREE.WebGLRenderer({
-            antialias: true
+            antialias: true,
+            preserveDrawingBuffer: true
         });
         console.log('✓ WebGL renderer initialized (fallback)');
         rendererType = 'WebGL';
@@ -674,14 +836,14 @@ function updateControlInstructions() {
     const infoElement = document.getElementById('info');
     
     if (deviceType === 'desktop') {
-        spawnInstruction.textContent = 'Click-and-hold creatures to grab';
-        cameraInstruction.textContent = 'Drag empty space to rotate view | Scroll to zoom | Enter VR to grab with controllers | C: cycle lens | Space: capture scene';
+        spawnInstruction.textContent = 'Click creatures to interact';
+        cameraInstruction.textContent = 'Drag empty space to rotate view | Scroll to zoom | Enter VR to interact with controllers | C: cycle lens | Space: capture scene';
     } else if (deviceType === 'mobile') {
         spawnInstruction.textContent = 'Tap cat to interact';
         cameraInstruction.textContent = 'Drag to rotate · Pinch to zoom';
     } else {
-        spawnInstruction.textContent = 'Point controller ray at a creature and hold trigger to grab';
-        cameraInstruction.textContent = 'Left stick: move · Right stick: look · Right A/B: cycle lens';
+        spawnInstruction.textContent = 'Point controller ray at a creature and press trigger to interact';
+        cameraInstruction.textContent = 'Left stick: move · Right stick: look · Y: cycle lens · A: capture';
     }
     
     if (infoElement && !document.getElementById('f1-hint') && deviceType !== 'mobile') {
@@ -733,6 +895,7 @@ function setupXRInteraction() {
         const grip = renderer.xr.getControllerGrip(i);
         grip.add(controllerModelFactory.createControllerModel(grip));
         cameraRig.add(grip);
+        xrControllerGrips.push(grip);
         
         const hand = renderer.xr.getHand(i);
         hand.userData.sourceId = `hand-${i + 1}`;
@@ -763,98 +926,17 @@ function setupControls() {
     }
 }
 
-function beginDesktopGrab(clientX, clientY) {
-    const picked = raycastPickableFromScreen(clientX, clientY);
-    if (!picked) return false;
-
-    const localOffset = new THREE.Vector3();
-    if (picked.hit?.point) {
-        localOffset.copy(picked.hit.point).sub(picked.entity.group.position);
-    }
-    const holdDistance = camera.position.distanceTo(picked.hit?.point || picked.entity.group.position);
-    return beginGrab(picked, desktopGrabState.sourceId, {
-        desktop: true,
-        pointerX: clientX,
-        pointerY: clientY,
-        holdDistance,
-        localOffset
-    });
-}
-
 function clearPendingDesktopInteraction() {
-    if (pendingDesktopInteraction.timerId !== null) {
-        clearTimeout(pendingDesktopInteraction.timerId);
-    }
     pendingDesktopInteraction.active = false;
     pendingDesktopInteraction.target = null;
-    pendingDesktopInteraction.timerId = null;
 }
 
 function startPendingDesktopInteraction(clientX, clientY) {
     const picked = raycastPickableFromScreen(clientX, clientY);
     if (!picked) return false;
-
-    const localOffset = new THREE.Vector3();
-    if (picked.hit?.point) {
-        localOffset.copy(picked.hit.point).sub(picked.entity.group.position);
-    }
-
     pendingDesktopInteraction.active = true;
     pendingDesktopInteraction.target = picked;
-    pendingDesktopInteraction.pointerX = clientX;
-    pendingDesktopInteraction.pointerY = clientY;
-    pendingDesktopInteraction.holdDistance = camera.position.distanceTo(
-        picked.hit?.point || picked.entity.group.position
-    );
-    pendingDesktopInteraction.localOffset.copy(localOffset);
-    pendingDesktopInteraction.timerId = setTimeout(() => {
-        if (!pendingDesktopInteraction.active || !pendingDesktopInteraction.target) return;
-        const target = pendingDesktopInteraction.target;
-        const pointerX = pendingDesktopInteraction.pointerX;
-        const pointerY = pendingDesktopInteraction.pointerY;
-        const holdDistance = pendingDesktopInteraction.holdDistance;
-        const dragOffset = pendingDesktopInteraction.localOffset.clone();
-        clearPendingDesktopInteraction();
-        beginGrab(target, desktopGrabState.sourceId, {
-            desktop: true,
-            pointerX,
-            pointerY,
-            holdDistance,
-            localOffset: dragOffset
-        });
-    }, HOLD_TO_DRAG_DELAY_MS);
-
     return true;
-}
-
-function clearPendingXRInteraction(sourceId) {
-    const pending = pendingXRInteractions.get(sourceId);
-    if (pending?.timerId) {
-        clearTimeout(pending.timerId);
-    }
-    pendingXRInteractions.delete(sourceId);
-}
-
-function startPendingXRInteraction(controller, picked) {
-    const sourceId = controller.userData.sourceId;
-    const localOffset = new THREE.Vector3(0, -0.05, -0.35);
-
-    const timerId = setTimeout(() => {
-        const pending = pendingXRInteractions.get(sourceId);
-        if (!pending) return;
-        clearPendingXRInteraction(sourceId);
-        beginGrab(pending.target, sourceId, {
-            xrController: pending.controller,
-            localOffset: pending.localOffset.clone()
-        });
-    }, HOLD_TO_DRAG_DELAY_MS);
-
-    pendingXRInteractions.set(sourceId, {
-        controller,
-        target: picked,
-        localOffset,
-        timerId
-    });
 }
 
 function onMouseDown(event) {
@@ -872,25 +954,6 @@ function onMouseDown(event) {
 }
 
 function onMouseMove(event) {
-    if (pendingDesktopInteraction.active) {
-        pendingDesktopInteraction.pointerX = event.clientX;
-        pendingDesktopInteraction.pointerY = event.clientY;
-        previousMousePosition = { x: event.clientX, y: event.clientY };
-        return;
-    }
-
-    if (desktopGrabState.active) {
-        desktopGrabState.pointer.x = event.clientX;
-        desktopGrabState.pointer.y = event.clientY;
-        const movedX = event.clientX - previousMousePosition.x;
-        const movedY = event.clientY - previousMousePosition.y;
-        if (Math.abs(movedX) > 3 || Math.abs(movedY) > 3) {
-            desktopGrabState.moved = true;
-        }
-        previousMousePosition = { x: event.clientX, y: event.clientY };
-        return;
-    }
-
     if (!isDragging) return;
     
     const deltaX = event.clientX - previousMousePosition.x;
@@ -913,47 +976,28 @@ function onMouseUp() {
     if (pendingDesktopInteraction.active) {
         const target = pendingDesktopInteraction.target;
         clearPendingDesktopInteraction();
-        suppressNextClickInteraction = true;
-        if (target) {
+        if (!hasDragged && target) {
+            suppressNextClickInteraction = true;
             triggerPickableInteraction(target, 'cursor');
         }
-        return;
-    }
-
-    if (desktopGrabState.active) {
-        const heldMs = performance.now() - (desktopGrabState.startedAt || performance.now());
-        const target = desktopGrabState.target;
-        const shouldTreatAsTap = !desktopGrabState.moved && heldMs < 180;
-        let releaseVelocity = new THREE.Vector3(0, 0.4, 0);
-
-        if (!shouldTreatAsTap) {
-            camera.getWorldDirection(tmpCameraDirection);
-            const fallback = tmpCameraDirection.clone().multiplyScalar(1.2).setY(0.8);
-            releaseVelocity = calculateReleaseVelocity(desktopGrabState.history, fallback)
-                .clampLength(0, 8);
-            releaseVelocity = applyStillReleaseDrop(target, desktopGrabState.history, releaseVelocity);
-            releaseVelocity = applyImmediateReleaseDrop(releaseVelocity);
-        }
-
-        endGrab(desktopGrabState.sourceId, shouldTreatAsTap ? new THREE.Vector3() : releaseVelocity);
-        suppressNextClickInteraction = true;
-        if (shouldTreatAsTap && target) {
-            const state = entityPhysicsStates.get(target.entity);
-            if (state) {
-                state.mode = 'idle';
-                state.body.type = CANNON.Body.KINEMATIC;
-                state.body.updateMassProperties();
-                state.body.velocity.set(0, 0, 0);
-                state.body.angularVelocity.set(0, 0, 0);
-                syncEntityFromPhysicsState(state);
-            }
-            setEntityHeld(target, false, null);
-            triggerPickableInteraction(target, 'cursor');
-        }
+        isDragging = false;
+        hasDragged = false;
         return;
     }
 
     isDragging = false;
+    hasDragged = false;
+}
+
+function onDocumentMouseOut(event) {
+    if (event.relatedTarget || event.toElement) {
+        return;
+    }
+    if (pendingDesktopInteraction.active) {
+        clearPendingDesktopInteraction();
+    }
+    isDragging = false;
+    hasDragged = false;
 }
 
 function onMouseWheel(event) {
@@ -996,6 +1040,26 @@ function onTouchEnd(event) {
         handleMobileTap(touch.clientX, touch.clientY);
     }
     hasDragged = false;
+}
+
+function onTouchCancel() {
+    isDragging = false;
+    hasDragged = false;
+    clearPendingDesktopInteraction();
+}
+
+function onWindowBlur() {
+    clearPendingDesktopInteraction();
+    isDragging = false;
+    hasDragged = false;
+}
+
+function onVisibilityChange() {
+    if (document.hidden) {
+        clearPendingDesktopInteraction();
+        isDragging = false;
+        hasDragged = false;
+    }
 }
 
 function handleMobileTap(clientX, clientY) {
@@ -1164,9 +1228,11 @@ function getTerrainY(x, z) {
 function spawnOcelot(x, z) {
     try {
         const groundY = getTerrainY(x, z);
+        const sizeVariation = THREE.MathUtils.randFloat(OCELOT_SIZE_VARIATION_MIN, OCELOT_SIZE_VARIATION_MAX);
         const ocelot = createOcelot({
             position: new THREE.Vector3(x, groundY, z),
-            boundarySize: boundarySize
+            boundarySize: boundarySize,
+            size: OCELOT_SIZE * sizeVariation
         });
         
         if (ocelot && ocelot.group) {
@@ -1208,6 +1274,7 @@ function spawnGrosbeak(x, z) {
         const grosbeak = createBlackHeadedGrosbeak({
             position: new THREE.Vector3(x, groundY, z),
             boundarySize,
+            size: GROSBEAK_SIZE,
             roaming: true,
             constrainPosition: (position) => {
                 environment?.constrainPositionAgainstHouse(position, xrCollisionPadding);
@@ -1222,6 +1289,81 @@ function spawnGrosbeak(x, z) {
         }
     } catch (error) {
         console.error('Failed to spawn grosbeak at', x, z, ':', error);
+        return null;
+    }
+}
+
+function spawnWesternTanager(x, z) {
+    try {
+        const groundY = getTerrainY(x, z);
+        const tanager = createWesternTanager({
+            position: new THREE.Vector3(x, groundY, z),
+            boundarySize,
+            size: WESTERN_TANAGER_SIZE,
+            roaming: true,
+            constrainPosition: (position) => {
+                environment?.constrainPositionAgainstHouse(position, xrCollisionPadding);
+            }
+        });
+
+        if (tanager && tanager.group) {
+            grosbeaks.push(tanager);
+            scene.add(tanager.group);
+            registerGrosbeakMeshes(tanager);
+            return tanager;
+        }
+    } catch (error) {
+        console.error('Failed to spawn western tanager at', x, z, ':', error);
+        return null;
+    }
+}
+
+function spawnBlackNapedOriole(x, z) {
+    try {
+        const groundY = getTerrainY(x, z);
+        const oriole = createBlackNapedOriole({
+            position: new THREE.Vector3(x, groundY, z),
+            boundarySize,
+            size: BLACK_NAPED_ORIOLE_SIZE,
+            roaming: true,
+            constrainPosition: (position) => {
+                environment?.constrainPositionAgainstHouse(position, xrCollisionPadding);
+            }
+        });
+
+        if (oriole && oriole.group) {
+            grosbeaks.push(oriole);
+            scene.add(oriole.group);
+            registerGrosbeakMeshes(oriole);
+            return oriole;
+        }
+    } catch (error) {
+        console.error('Failed to spawn black-naped oriole at', x, z, ':', error);
+        return null;
+    }
+}
+
+function spawnBlueCrownedHangingParrot(x, z) {
+    try {
+        const groundY = getTerrainY(x, z);
+        const hangingParrot = createBlueCrownedHangingParrot({
+            position: new THREE.Vector3(x, groundY, z),
+            boundarySize,
+            size: BLUE_CROWNED_HANGING_PARROT_SIZE,
+            roaming: true,
+            constrainPosition: (position) => {
+                environment?.constrainPositionAgainstHouse(position, xrCollisionPadding);
+            }
+        });
+
+        if (hangingParrot && hangingParrot.group) {
+            grosbeaks.push(hangingParrot);
+            scene.add(hangingParrot.group);
+            registerGrosbeakMeshes(hangingParrot);
+            return hangingParrot;
+        }
+    } catch (error) {
+        console.error('Failed to spawn blue-crowned hanging parrot at', x, z, ':', error);
         return null;
     }
 }
@@ -1291,6 +1433,7 @@ function getHeldVisualState(target) {
     const state = {
         glow,
         baseScale: new THREE.Vector3(1, 1, 1),
+        targetType: target.type,
         radius,
         height,
         startedAt: 0,
@@ -1462,6 +1605,23 @@ function applyImmediateReleaseDrop(velocity) {
     return adjustedVelocity;
 }
 
+function computeTossReleaseVelocity(target, history, fallback, maxSpeed = 8) {
+    let releaseVelocity = calculateReleaseVelocity(history, fallback).clampLength(0, maxSpeed);
+    if (!target || target.type === 'butterfly') {
+        return applyImmediateReleaseDrop(releaseVelocity);
+    }
+
+    if (isStillRelease(history)) {
+        releaseVelocity = applyStillReleaseDrop(target, history, releaseVelocity);
+        return applyImmediateReleaseDrop(releaseVelocity);
+    }
+
+    const horizontalSpeed = Math.hypot(releaseVelocity.x, releaseVelocity.z);
+    const tossLift = THREE.MathUtils.clamp(0.55 + horizontalSpeed * 0.16, 0.55, 1.3);
+    releaseVelocity.y = Math.max(releaseVelocity.y, tossLift);
+    return releaseVelocity;
+}
+
 function clampDesktopGrabHoldDistance(value) {
     return THREE.MathUtils.clamp(
         value,
@@ -1560,6 +1720,71 @@ function endGrab(sourceId, releaseVelocity = null) {
     return target;
 }
 
+function releaseDesktopGrab(options = {}) {
+    if (!desktopGrabState.active) return null;
+
+    const {
+        allowTap = true,
+        fallbackVelocity = null
+    } = options;
+    const heldMs = performance.now() - (desktopGrabState.startedAt || performance.now());
+    const target = desktopGrabState.target;
+    const shouldTreatAsTap = allowTap && !desktopGrabState.moved && heldMs < 180;
+    let releaseVelocity = fallbackVelocity ? fallbackVelocity.clone() : new THREE.Vector3(0, 0.4, 0);
+
+    if (!shouldTreatAsTap) {
+        if (!fallbackVelocity) {
+            camera.getWorldDirection(tmpCameraDirection);
+            const fallback = tmpCameraDirection.clone().multiplyScalar(1.2).setY(0.8);
+            releaseVelocity = computeTossReleaseVelocity(target, desktopGrabState.history, fallback, 8);
+        } else {
+            releaseVelocity = calculateReleaseVelocity(desktopGrabState.history, fallbackVelocity).clampLength(0, 8);
+            releaseVelocity = applyImmediateReleaseDrop(releaseVelocity);
+        }
+    }
+
+    endGrab(
+        desktopGrabState.sourceId,
+        shouldTreatAsTap ? new THREE.Vector3() : releaseVelocity
+    );
+    suppressNextClickInteraction = true;
+
+    if (shouldTreatAsTap && target) {
+        const state = entityPhysicsStates.get(target.entity);
+        if (state) {
+            state.mode = 'idle';
+            state.body.type = CANNON.Body.KINEMATIC;
+            state.body.updateMassProperties();
+            state.body.velocity.set(0, 0, 0);
+            state.body.angularVelocity.set(0, 0, 0);
+            syncEntityFromPhysicsState(state);
+        }
+        setEntityHeld(target, false, null);
+        triggerPickableInteraction(target, 'cursor');
+    }
+
+    return target;
+}
+
+function releaseXRGrab(sourceId, sourceQuaternion = null, forceDrop = false) {
+    const grab = xrGrabStates.get(sourceId);
+    if (!grab) return null;
+
+    let releaseVelocity;
+    if (forceDrop) {
+        releaseVelocity = new THREE.Vector3(0, -0.75, 0);
+        releaseVelocity = applyImmediateReleaseDrop(releaseVelocity);
+    } else {
+        const fallback = new THREE.Vector3(0, 1.1, -0.8);
+        if (sourceQuaternion) {
+            fallback.applyQuaternion(sourceQuaternion);
+        }
+        releaseVelocity = computeTossReleaseVelocity(grab.target, grab.history, fallback, 9);
+    }
+
+    return endGrab(sourceId, releaseVelocity);
+}
+
 function syncEntityFromPhysicsState(state) {
     tmpWorldVec3.set(state.body.position.x, state.body.position.y, state.body.position.z);
     tmpWorldQuat.set(
@@ -1627,6 +1852,7 @@ function stepPhysicsAndSync(delta) {
             const settleY = getReleaseSettleY(state.target, state.body.position.x, state.body.position.z);
             const nearTerrain = state.body.position.y <= settleY + 0.2;
             const verticalSpeed = Math.abs(state.body.velocity.y);
+            const shouldFinalizeGrounded = state.releaseTimer <= -0.35 && nearTerrain;
 
             if (state.body.position.y <= settleY) {
                 state.body.position.y = settleY;
@@ -1635,7 +1861,10 @@ function stepPhysicsAndSync(delta) {
                 }
             }
 
-            if (state.releaseTimer <= 0 && nearTerrain && verticalSpeed < 0.35) {
+            if ((state.releaseTimer <= 0 && nearTerrain && verticalSpeed < 0.35) || shouldFinalizeGrounded) {
+                state.body.position.y = settleY;
+                state.body.velocity.set(0, 0, 0);
+                state.body.angularVelocity.set(0, 0, 0);
                 enforceReleaseUprightOrientation(state);
                 syncEntityFromPhysicsState(state);
                 completeReleaseHandoff(state);
@@ -1715,8 +1944,7 @@ function updateXRGrabStates() {
         }
 
         if (!grab.sourceObject.parent) {
-            xrGrabStates.delete(sourceId);
-            endGrab(sourceId, new THREE.Vector3(0, 0.6, -0.2));
+            releaseXRGrab(sourceId, null, true);
         }
     }
 }
@@ -1725,13 +1953,22 @@ function updateHeldVisualStates(time) {
     for (const [entity, state] of heldVisualStates.entries()) {
         if (!state.active) continue;
 
+        const physicsState = entityPhysicsStates.get(entity);
+        if (!physicsState || physicsState.mode !== 'held') {
+            state.active = false;
+            state.glow.visible = false;
+            entity.group.scale.copy(state.baseScale);
+            continue;
+        }
+
         const elapsed = Math.max(0, time - state.startedAt);
         const pulseProgress = Math.min(elapsed / HELD_PULSE_DURATION_MS, 1);
         const pulse = Math.sin(Math.min(pulseProgress, 1) * Math.PI);
         const settleScale = 1 + HELD_SCALE_BOOST * (0.45 + 0.55 * pulse);
+        const heldScaleMultiplier = getHeldScaleMultiplier(state.targetType);
         const liftOffset = HELD_PULSE_HEIGHT * pulse;
 
-        entity.group.scale.copy(state.baseScale).multiplyScalar(settleScale);
+        entity.group.scale.copy(state.baseScale).multiplyScalar(settleScale * heldScaleMultiplier);
 
         state.glow.position.set(
             entity.group.position.x,
@@ -1940,11 +2177,6 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-
-    if (wideAngleComposer) {
-        wideAngleComposer.setPixelRatio(window.devicePixelRatio);
-        wideAngleComposer.setSize(window.innerWidth, window.innerHeight);
-    }
     
     // Ensure canvas is visible and properly sized
     const canvas = renderer.domElement;
@@ -1961,7 +2193,7 @@ function onXRSelectStart(event) {
     const picked = raycastPickableFromXR(controller);
 
     if (picked) {
-        startPendingXRInteraction(controller, picked);
+        triggerPickableInteraction(picked, sourceId);
         return;
     }
 
@@ -1972,25 +2204,6 @@ function onXRSelectStart(event) {
 
 function onXRSelectEnd(event) {
     const controller = event.target;
-    const sourceId = controller.userData.sourceId;
-    const pending = pendingXRInteractions.get(sourceId);
-    if (pending) {
-        clearPendingXRInteraction(sourceId);
-        triggerPickableInteraction(pending.target, sourceId);
-        return;
-    }
-
-    const grab = xrGrabStates.get(sourceId);
-    if (!grab) return;
-
-    const fallback = new THREE.Vector3(0, 1.1, -0.8).applyQuaternion(controller.quaternion);
-    const releaseVelocity = applyStillReleaseDrop(
-        grab.target,
-        grab.history,
-        calculateReleaseVelocity(grab.history, fallback).clampLength(0, 9)
-    );
-    endGrab(sourceId, applyImmediateReleaseDrop(releaseVelocity));
-
     const ray = controller.getObjectByName('controller-ray');
     if (ray) {
         ray.material.color.setHex(0xa0c0a0);
@@ -2040,33 +2253,25 @@ function getXRThumbstickAxes(axes) {
         return { x: 0, y: 0 };
     }
 
-    // Quest controllers expose the active thumbstick on axes[0/1].
-    // Keep axes[2/3] as a fallback for runtimes that report the stick there.
-    let rawX = Number.isFinite(axes[0]) ? axes[0] : 0;
-    let rawY = Number.isFinite(axes[1]) ? axes[1] : 0;
+    // Per the `xr-standard` gamepad mapping spec, the primary thumbstick is at
+    // axes[2] (X) and axes[3] (Y). axes[0/1] are reserved for a primary touchpad
+    // (Quest controllers have no touchpad, so these are always 0 placeholders).
+    // Fall back to axes[0/1] only for non-standard runtimes that don't report axes[2/3].
+    let rawX = 0;
+    let rawY = 0;
 
-    if (axes.length >= 4 && Number.isFinite(axes[2]) && Number.isFinite(axes[3])) {
-        const primaryIdle = Math.abs(rawX) <= VR_DEAD_ZONE && Math.abs(rawY) <= VR_DEAD_ZONE;
-        const fallbackActive = Math.abs(axes[2]) > VR_DEAD_ZONE || Math.abs(axes[3]) > VR_DEAD_ZONE;
-        if (primaryIdle && fallbackActive) {
-            rawX = axes[2];
-            rawY = axes[3];
-        }
+    if (axes.length >= 4 && (Number.isFinite(axes[2]) || Number.isFinite(axes[3]))) {
+        rawX = Number.isFinite(axes[2]) ? axes[2] : 0;
+        rawY = Number.isFinite(axes[3]) ? axes[3] : 0;
+    } else {
+        rawX = Number.isFinite(axes[0]) ? axes[0] : 0;
+        rawY = Number.isFinite(axes[1]) ? axes[1] : 0;
     }
 
     return {
         x: Math.abs(rawX) > VR_DEAD_ZONE ? rawX : 0,
         y: Math.abs(rawY) > VR_DEAD_ZONE ? rawY : 0
     };
-}
-
-function isXRLensCyclePressed(buttons) {
-    if (!buttons || !buttons.length) return false;
-
-    // Standard WebXR gamepad mapping:
-    // 4 = primary face button (A/X), 5 = secondary face button (B/Y)
-    // Keep index 2 as legacy fallback for older mappings.
-    return Boolean(buttons[4]?.pressed || buttons[5]?.pressed || buttons[2]?.pressed);
 }
 
 function handleXRLocomotion(delta) {
@@ -2082,16 +2287,24 @@ function handleXRLocomotion(delta) {
         if ((!axes || !axes.length) && (!buttons || !buttons.length)) continue;
 
         const { x: stickX, y: stickY } = getXRThumbstickAxes(axes);
-        
-        // Handle button inputs for camera functions
+
+        // Meta Quest button mapping (standard WebXR gamepad):
+        //   Right controller: A = buttons[4], B = buttons[5]
+        //   Left controller:  X = buttons[4], Y = buttons[5]
         if (buttons && buttons.length) {
-            // Cycle lens presets with right controller face buttons (A/B).
-            if (source.handedness === 'right' && isXRLensCyclePressed(buttons)) {
-                // Debounce the button press to prevent rapid toggling
-                if (!xrInteractionCooldown.get('viewfinder-toggle')) {
+            if (source.handedness === 'right') {
+                // A (buttons[4]): capture scene when viewfinder is active
+                if (buttons[4]?.pressed && !xrInteractionCooldown.get('xr-capture')) {
+                    if (cameraViewfinderActive) captureScene();
+                    xrInteractionCooldown.set('xr-capture', true);
+                    setTimeout(() => xrInteractionCooldown.delete('xr-capture'), 400);
+                }
+            } else if (source.handedness === 'left') {
+                // Y (buttons[5]): cycle through lens presets; wraps back to OFF
+                if (buttons[5]?.pressed && !xrInteractionCooldown.get('xr-viewfinder-toggle')) {
                     cycleLensMode();
-                    xrInteractionCooldown.set('viewfinder-toggle', true);
-                    setTimeout(() => xrInteractionCooldown.delete('viewfinder-toggle'), 300);
+                    xrInteractionCooldown.set('xr-viewfinder-toggle', true);
+                    setTimeout(() => xrInteractionCooldown.delete('xr-viewfinder-toggle'), 400);
                 }
             }
         }
@@ -2120,9 +2333,6 @@ function renderFrame(time = performance.now()) {
         lastFrameTime = time;
 
         handleXRLocomotion(delta);
-        autoReleaseExpiredHolds(time);
-        updateXRGrabStates();
-        updateDesktopGrab();
         stepPhysicsAndSync(delta);
         updateHeldVisualStates(time);
 
@@ -2172,28 +2382,16 @@ function renderFrame(time = performance.now()) {
         
         updateDashboard();
 
-        const lensTransition = Math.min(delta * 6, 1);
-
-        if (Math.abs(currentFov - targetFov) > 0.01) {
-            currentFov += (targetFov - currentFov) * lensTransition;
+        // Smooth FOV transition for desktop/non-VR.
+        if (!renderer.xr.isPresenting && Math.abs(currentFov - targetFov) > 0.01) {
+            currentFov += (targetFov - currentFov) * Math.min(delta * 6, 1);
             camera.fov = currentFov;
             camera.updateProjectionMatrix();
         }
 
-        if (wideAnglePass) {
-            wideAnglePass.uniforms.strength.value += (targetLensStrength - wideAnglePass.uniforms.strength.value) * lensTransition;
-            wideAnglePass.uniforms.k0.value += (targetLensK0 - wideAnglePass.uniforms.k0.value) * lensTransition;
-            wideAnglePass.uniforms.k1.value += (targetLensK1 - wideAnglePass.uniforms.k1.value) * lensTransition;
-            wideAnglePass.uniforms.k2.value += (targetLensK2 - wideAnglePass.uniforms.k2.value) * lensTransition;
-            wideAnglePass.uniforms.vignette.value += (targetLensVignette - wideAnglePass.uniforms.vignette.value) * lensTransition;
-            wideAnglePass.uniforms.zoom.value += (targetLensZoom - wideAnglePass.uniforms.zoom.value) * lensTransition;
-        }
-
-        if (cameraViewfinderActive && wideAngleComposer) {
-            wideAngleComposer.render();
-        } else {
-            renderer.render(scene, camera);
-        }
+        updateVRLensOverlay(time);
+        applyXRLensProjectionOverride();
+        renderer.render(scene, camera);
     } catch (error) {
         console.error('Error in render loop:', error);
         // Display error message on screen

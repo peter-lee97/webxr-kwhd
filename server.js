@@ -38,10 +38,21 @@ app.get('/dashboard', (req, res) => {
 
 app.use(express.static('dist'));
 
+function createCaptureFilename() {
+  const base = `capture-${Date.now()}`;
+  let filename = `${base}.png`;
+  let counter = 1;
+  while (fs.existsSync(path.join(CAPTURES_DIR, filename))) {
+    filename = `${base}-${counter}.png`;
+    counter += 1;
+  }
+  return filename;
+}
+
 app.post('/save-capture', (req, res) => {
-  const { name, dataUrl } = req.body;
-  if (!name || !dataUrl) {
-    return res.status(400).json({ error: 'Missing name or dataUrl' });
+  const { dataUrl } = req.body;
+  if (!dataUrl) {
+    return res.status(400).json({ error: 'Missing dataUrl' });
   }
   const matches = dataUrl.match(/^data:image\/png;base64,(.+)$/);
   if (!matches) {
@@ -49,7 +60,7 @@ app.post('/save-capture', (req, res) => {
   }
   try {
     if (!fs.existsSync(CAPTURES_DIR)) fs.mkdirSync(CAPTURES_DIR, { recursive: true });
-    const filename = `${name}.png`;
+    const filename = createCaptureFilename();
     fs.writeFileSync(path.join(CAPTURES_DIR, filename), Buffer.from(matches[1], 'base64'));
     res.json({ file: filename });
   } catch (err) {

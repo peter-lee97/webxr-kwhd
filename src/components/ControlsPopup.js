@@ -81,7 +81,11 @@ export class ControlsPopup {
                     </div>
                     <div class="control-item">
                         <div class="control-key">Y Button</div>
-                        <div class="control-desc">Toggle viewfinder</div>
+                        <div class="control-desc">Cycle lens mode</div>
+                    </div>
+                    <div class="control-item">
+                        <div class="control-key">A Button</div>
+                        <div class="control-desc">Capture scene</div>
                     </div>
                     <div class="control-item">
                         <div class="control-key">Left Stick</div>

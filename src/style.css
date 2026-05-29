@@ -251,6 +251,34 @@ canvas {
   white-space: nowrap;
 }
 
+#lens-overlay {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 110;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  background: rgba(18, 52, 18, var(--opacity-medium));
+  border: 1px solid rgba(42, 106, 42, 0.35);
+  color: var(--forest-highlight);
+  font-size: clamp(1rem, 2.4vw, 1.35rem);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-sm);
+  transition: opacity 160ms ease, visibility 160ms ease;
+}
+
+#lens-overlay.is-visible {
+  opacity: 0.8;
+  visibility: visible;
+}
+
 /* Controls Toggle Button */
 #controls-toggle {
   position: absolute;
