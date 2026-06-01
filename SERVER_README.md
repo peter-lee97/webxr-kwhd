@@ -1,83 +1,57 @@
-# Server Implementation
+# Server/API reference
 
-This Express server provides:
-1. Static file serving for the built frontend
-2. Authentication-protected `/downloads` endpoint
-3. File listing, downloading, and deletion from captures folder
+This project has two server modes:
+
+1. **Development (`npm run dev`)**: Vite HTTPS dev server + middleware routes from `vite.config.js`
+2. **Production (`npm run build && npm start`)**: Express server from `server.js`
+
+Both modes support saving captures and listing/downloading files.
 
 ## Setup
 
-1. Install dependencies:
 ```bash
 npm install
-```
-
-2. Configure environment variables:
-```bash
 cp .env.example .env
-# Edit .env with your credentials
 ```
 
-## Environment Variables
+`.env`:
 
-Create a `.env` file (not committed to git):
-```
+```env
 DOWNLOADS_USER=admin
 DOWNLOADS_PASS=changeme
 PORT=3000
 ```
 
-## Usage
+## App routes
 
-### Development
-```bash
-npm run dev
-```
-Starts Vite dev server on port 5173 (HTTPS with self-signed certs)
+- `GET /` — main app
+- `GET /dashboard` — capture management dashboard
+- `GET /gallery` — public gallery view
 
-### Production
-```bash
-npm run build
-npm start
-```
-Builds the frontend and starts Express server on port 3000
+## Capture routes (production / Express)
 
-### Accessing Dashboard
+### POST `/save-capture`
 
-Open `http://localhost:3000/dashboard` to access the captures dashboard with:
-- Table view of all capture files
-- Search functionality
-- Multi-select for batch operations
-- Download selected files
-- Delete selected files
-- Preview images on click
-- Basic authentication protection
+Request body:
 
-The dashboard will prompt for credentials on first interaction.
-
-## API Endpoints
-
-### GET `/`
-Serves the main VR application (from `dist/index.html`)
-
-### GET `/dashboard`
-Serves the captures dashboard UI for managing capture files
-
-### GET `/downloads`
-List all capture files (requires authentication)
-
-**Request Headers:**
-```
-Authorization: Basic <base64_credentials>
+```json
+{ "dataUrl": "data:image/png;base64,..." }
 ```
 
-**Response:**
+Notes:
+- `server.js` uses `dataUrl` and generates a unique filename automatically.
+- Client currently also sends `name`; this is ignored safely by Express.
+
+### GET `/downloads` (basic auth required)
+
+Returns:
+
 ```json
 {
   "files": [
     {
-      "name": "capture_001.png",
-      "url": "/downloads/capture_001.png",
+      "name": "capture-1730000000000.png",
+      "url": "/downloads/capture-1730000000000.png",
       "size": 929079,
       "modified": "2026-05-06T15:48:30.342Z"
     }
@@ -85,97 +59,48 @@ Authorization: Basic <base64_credentials>
 }
 ```
 
-### GET `/downloads/:filename`
-Download a specific capture file (requires authentication)
+### GET `/downloads/:filename` (basic auth required)
 
-**Request Headers:**
-```
-Authorization: Basic <base64_credentials>
-```
+Serves the image file if it exists.
 
-**Response:** File download with `Content-Disposition: attachment` header
+### DELETE `/downloads/:filename` (basic auth required)
 
-### DELETE `/downloads/:filename`
-Delete a specific capture file (requires authentication)
+Deletes one file:
 
-**Request Headers:**
-```
-Authorization: Basic <base64_credentials>
-```
-
-**Response:**
 ```json
-{
-  "success": true
-}
+{ "success": true }
 ```
 
-## Authentication
+### GET `/gallery/files`
 
-All `/downloads` endpoints require Basic Authentication.
+Public listing for gallery page.
 
-**Using curl:**
+### GET `/gallery/files/:filename`
+
+Serves image file for gallery.
+
+### GET `/gallery/download/:filename`
+
+Forces browser download of gallery image.
+
+## Auth usage example
+
 ```bash
-# Encode credentials
 AUTH=$(echo -n "admin:changeme" | base64)
-
-# List files
 curl -H "Authorization: Basic $AUTH" http://localhost:3000/downloads
-
-# Download file
-curl -H "Authorization: Basic $AUTH" -O http://localhost:3000/downloads/capture_001.png
-
-# Delete file
-curl -X DELETE -H "Authorization: Basic $AUTH" http://localhost:3000/downloads/capture_001.png
 ```
 
-**Using browser:**
-- Browser will prompt for username/password
-- Enter credentials from .env file
+## Run commands
 
-## Deployment
+Development:
 
-### Platform Requirements
-- Node.js runtime
-- HTTPS support (required for WebXR in production)
-- Ability to write to `captures` directory
+```bash
+npm run dev
+```
 
-### Deployment Steps
+Production:
 
-1. Build the application:
 ```bash
 npm run build
-```
-
-2. Set environment variables on platform:
-```
-DOWNLOADS_USER=your_secure_username
-DOWNLOADS_PASS=your_secure_password
-PORT=3000
-```
-
-3. Start the server:
-```bash
 npm start
 ```
-
-### Recommended Platforms
-
-- **Render**: Free tier available, automatic HTTPS
-- **Railway**: Simple deployment, automatic HTTPS
-- **Heroku**: Established platform, automatic HTTPS
-- **VPS**: Full control, need to configure HTTPS
-
-## Security Notes
-
-1. Always use HTTPS in production
-2. Change default credentials immediately
-3. Keep `.env` file out of version control (already in .gitignore)
-4. Consider adding rate limiting for production
-5. Consider implementing session-based auth for more secure use
-
-## Captures Directory
-
-Files are stored in the `captures/` folder (ignored by git).
-The `/save-capture` endpoint in `vite.config.js` saves images here during development.
-In production, the Express server does not implement `/save-capture` - captures must be uploaded via other means.

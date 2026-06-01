@@ -1,98 +1,94 @@
-# WebXR KWHD — Production Deployment
+# WebXR KWHD — deployment runbook
 
-## Server
+## Current production target
 
 | Key | Value |
 |---|---|
-| IP | `49.12.186.48` |
-| Domain | `vr.compilechicken.com` |
 | Provider | Hetzner Cloud |
-| SSH Key | `.ssh/hetzner_id` |
-| SSH User | `root` |
+| Host/IP | `49.12.186.48` |
+| Domain | `vr.compilechicken.com` |
+| SSH user | `root` |
+| SSH key | `.ssh/hetzner_id` |
+
+SSH:
 
 ```bash
 ssh -i .ssh/hetzner_id root@49.12.186.48
 ```
 
-## Architecture
+## Stack
 
-```
-Internet
-  ↓ :80 (HTTP) / :443 (HTTPS)
-Caddy (reverse proxy + auto TLS)
-  ↓ internal Docker network
-webxr-kwhd (Express, port 3000)
-  ↓ bind-mount
-./captures/
-```
+`Internet -> Caddy (TLS/443) -> webxr-app:3000 (Express) -> ./captures (bind mount)`
 
-## Prerequisites
+Defined in `docker-compose.prod.yml`:
+- `caddy` service (ports 80/443)
+- `webxr-app` service (builds this repo)
+- persistent `captures` folder on host
 
-> **HTTPS / WebXR note:** WebXR requires HTTPS. Caddy will auto-provision a Let's Encrypt certificate once you point a domain at this server and update `Caddyfile` with the domain. Without a domain, the server runs on HTTP only (suitable for initial testing).
+## First deployment
 
-## Initial Deploy
+From local repo root:
 
 ```bash
-# From your local machine:
 ./deploy.sh
 ```
 
-The deploy script will:
-1. Rsync source files to the server
-2. Install Docker (if needed)
-3. Build the Docker image on the server
-4. Start Caddy + the app via Docker Compose
+`deploy.sh` does all of the following:
+1. Rsync project files to `/opt/webxr-kwhd`
+2. Install Docker remotely if missing
+3. Create `.env` from `.env.example` if absent
+4. Create `captures/`
+5. Start/rebuild services with `docker compose up -d --build`
 
-## Adding a Domain (for HTTPS / WebXR)
+## Normal redeploy
 
-1. Point an `A` record at `49.12.186.48` (e.g., `app.yourdomain.com`)
-2. Edit `Caddyfile` on the server — replace `:80` with your domain:
-   ```caddyfile
-   app.yourdomain.com {
-       reverse_proxy webxr-app:3000
-   }
-   ```
+After code changes:
+
+```bash
+./deploy.sh
+```
+
+## Domain and HTTPS
+
+`Caddyfile` currently uses:
+
+```caddyfile
+vr.compilechicken.com {
+    reverse_proxy webxr-app:3000
+}
+```
+
+If domain changes:
+1. Update DNS `A` record to point to the server IP.
+2. Edit `/opt/webxr-kwhd/Caddyfile` with the new host.
 3. Restart Caddy:
    ```bash
-   ssh -i .ssh/hetzner_id root@49.12.186.48
    cd /opt/webxr-kwhd
    docker compose restart caddy
    ```
 
-## Re-deploy After Code Changes
+## Environment variables
 
-```bash
-./deploy.sh
-```
-
-This syncs changed files and rebuilds the image on the server.
-
-## Environment Variables
-
-Override in `/opt/webxr-kwhd/.env` on the server:
+Set in `/opt/webxr-kwhd/.env`:
 
 ```env
 PORT=3000
 DOWNLOADS_USER=admin
-DOWNLOADS_PASS=changeme   # ← change this!
+DOWNLOADS_PASS=changeme
 ```
 
-## Useful Commands (on server)
+Change `DOWNLOADS_PASS` before exposing `/downloads` publicly.
+
+## Operations
 
 ```bash
 cd /opt/webxr-kwhd
 
-docker compose ps                    # status
-docker compose logs -f               # all logs
-docker compose logs -f webxr-app     # app logs
-docker compose logs -f caddy         # proxy logs
-
-# Restart
+docker compose ps
+docker compose logs -f
+docker compose logs -f webxr-app
+docker compose logs -f caddy
 docker compose restart
-
-# Full rebuild
 docker compose down && docker compose up -d --build
-
-# View captures
-ls captures/
+ls -lah captures/
 ```
