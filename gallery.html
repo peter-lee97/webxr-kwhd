@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capture Gallery</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #081c08 0%, #123412 100%);
+            color: #d0e0d0;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        .container { max-width: 1280px; margin: 0 auto; }
+        h1 {
+            color: #a0c0a0;
+            margin-bottom: 1.25rem;
+            text-align: center;
+            font-size: 2rem;
+        }
+        .toolbar {
+            display: flex;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .toolbar input {
+            min-width: 260px;
+            padding: 0.7rem 0.9rem;
+            border: 1px solid #3a8a3a;
+            border-radius: 6px;
+            background: rgba(26, 74, 26, 0.5);
+            color: #d0e0d0;
+        }
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 1rem;
+        }
+        .card {
+            background: rgba(18, 52, 18, 0.75);
+            border: 1px solid #3a8a3a;
+            border-radius: 10px;
+            overflow: hidden;
+            backdrop-filter: blur(4px);
+        }
+        .card img {
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            object-fit: cover;
+            display: block;
+            cursor: pointer;
+        }
+        .card-body { padding: 0.8rem; }
+        .name {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #d0e0d0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-bottom: 0.35rem;
+        }
+        .meta {
+            font-size: 0.8rem;
+            color: #89a889;
+            margin-bottom: 0.7rem;
+        }
+        .btn {
+            width: 100%;
+            padding: 0.55rem 0.7rem;
+            border: 1px solid #3a8a3a;
+            border-radius: 6px;
+            background: rgba(58, 138, 58, 0.3);
+            color: #d0e0d0;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+        .btn:hover { background: rgba(58, 138, 58, 0.5); }
+        .empty {
+            text-align: center;
+            color: #89a889;
+            padding: 3rem 1rem;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.88);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 1rem;
+        }
+        .modal.active { display: flex; }
+        .modal img {
+            max-width: 94vw;
+            max-height: 88vh;
+            border: 1px solid #3a8a3a;
+            border-radius: 8px;
+        }
+        .close {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 999px;
+            background: rgba(58, 138, 58, 0.35);
+            color: #d0e0d0;
+            font-size: 1.6rem;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Capture Gallery</h1>
+        <div class="toolbar">
+            <input id="search" type="text" placeholder="Search images...">
+        </div>
+        <div id="gallery" class="gallery-grid"></div>
+        <div id="empty" class="empty" style="display:none;">No captures found.</div>
+    </div>
+
+    <div id="modal" class="modal">
+        <button class="close" onclick="closeModal()">&times;</button>
+        <img id="modalImage" src="" alt="Capture preview">
+    </div>
+
+    <script>
+        let allFiles = [];
+
+        function formatSize(bytes) {
+            if (!bytes) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            const idx = Math.floor(Math.log(bytes) / Math.log(1024));
+            return `${(bytes / (1024 ** idx)).toFixed(idx === 0 ? 0 : 2)} ${units[idx]}`;
+        }
+
+        function formatDate(value) {
+            return new Date(value).toLocaleString();
+        }
+
+        function render(files) {
+            const gallery = document.getElementById('gallery');
+            const empty = document.getElementById('empty');
+
+            if (!files.length) {
+                gallery.innerHTML = '';
+                empty.style.display = 'block';
+                return;
+            }
+
+            empty.style.display = 'none';
+            gallery.innerHTML = files.map((file) => `
+                <article class="card">
+                    <img src="${file.url}" alt="${file.name}" onclick="openModal('${file.url}')">
+                    <div class="card-body">
+                        <div class="name">${file.name}</div>
+                        <div class="meta">${formatSize(file.size)} • ${formatDate(file.modified)}</div>
+                        <a class="btn" href="${file.downloadUrl}" download="${file.name}">Download</a>
+                    </div>
+                </article>
+            `).join('');
+        }
+
+        async function loadGallery() {
+            const response = await fetch('/gallery/files');
+            if (!response.ok) {
+                throw new Error('Failed to load gallery');
+            }
+            const data = await response.json();
+            allFiles = data.files || [];
+            render(allFiles);
+        }
+
+        function filterGallery(term) {
+            const q = term.trim().toLowerCase();
+            if (!q) {
+                render(allFiles);
+                return;
+            }
+            render(allFiles.filter((f) => f.name.toLowerCase().includes(q)));
+        }
+
+        function openModal(url) {
+            document.getElementById('modalImage').src = url;
+            document.getElementById('modal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('modal').classList.remove('active');
+        }
+
+        document.getElementById('modal').addEventListener('click', (e) => {
+            if (e.target.id === 'modal') closeModal();
+        });
+
+        document.getElementById('search').addEventListener('input', (e) => {
+            filterGallery(e.target.value);
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+
+        loadGallery().catch(() => {
+            document.getElementById('gallery').innerHTML = '';
+            document.getElementById('empty').style.display = 'block';
+            document.getElementById('empty').textContent = 'Failed to load gallery.';
+        });
+    </script>
+</body>
+</html>

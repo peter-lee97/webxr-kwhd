@@ -56,15 +56,17 @@ Then open:
 
 ## Deploy
 
-### Option A: one-command server deploy (current Hetzner flow)
+### One-command deploy to the shared prod server
 
 ```bash
 ./deploy.sh
 ```
 
-This syncs the repo to `/opt/webxr-kwhd` on the configured server, ensures Docker is present, and starts `docker compose` with Caddy + app containers.
+This builds the Docker image locally, ships it to the shared prod server (`mc.prod`, reachable via `ssh mc.prod`), and runs it under `docker compose` at `~/webxr/` on host port `127.0.0.1:4100`.
+Public URL: `https://vr.compilechicken.com`, TLS handled by the server's host Caddy.
+See [deployment.md](./deployment.md) for the full runbook and first-time setup.
 
-### Option B: manual Docker deployment
+### Manual local Docker run
 
 ```bash
 docker build -t webxr-kwhd .
@@ -82,7 +84,8 @@ Use a reverse proxy (Caddy/Nginx/Traefik) for HTTPS in production.
 |---|---|---|
 | `PORT` | `3000` | Express server port |
 | `DOWNLOADS_USER` | `admin` | Basic-auth username for `/downloads*` |
-| `DOWNLOADS_PASS` | `changeme` | Basic-auth password for `/downloads*` |
+| `DOWNLOADS_PASS` | `changeme` | Basic-auth password for `/downloads*`. Set a real value in prod |
+| `CAPTURES_MAX_FILES` | `500` | Oldest captures are pruned automatically past this count |
 
 Copy from template:
 

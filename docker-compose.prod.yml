@@ -1,36 +1,18 @@
-services:
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - webnet
-    depends_on:
-      - webxr-app
+name: webxr
 
-  webxr-app:
-    build: .
+services:
+  app:
     image: webxr-kwhd:latest
-    restart: unless-stopped
-    expose:
-      - "3000"
+    pull_policy: never
+    ports:
+      - "127.0.0.1:4100:3000"
     env_file:
       - .env
     volumes:
       - ./captures:/app/captures
-    networks:
-      - webnet
-
-networks:
-  webnet:
-
-volumes:
-  caddy_data:
-  caddy_config:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"

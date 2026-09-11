@@ -6,3 +6,7 @@ captures
 .vite
 .DS_Store
 *.local
+.git
+.ssh
+.github
+.kilo

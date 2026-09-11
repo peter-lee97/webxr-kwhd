@@ -107,7 +107,13 @@ export default defineConfig({
                     
                     // Handle file download
                     if (req.url.startsWith('/downloads/') && req.method === 'GET') {
-                        const filename = req.url.replace('/downloads/', '');
+                        const filename = decodeURIComponent(req.url.replace('/downloads/', ''));
+                        if (!/^[A-Za-z0-9._-]+\.png$/.test(filename)) {
+                            res.statusCode = 400;
+                            res.setHeader('Content-Type', 'application/json');
+                            res.end(JSON.stringify({ error: 'Invalid filename' }));
+                            return;
+                        }
                         const filePath = path.join(capturesDir, filename);
                         
                         try {
@@ -132,7 +138,13 @@ export default defineConfig({
                     
                     // Handle file deletion
                     if (req.url.startsWith('/downloads/') && req.method === 'DELETE') {
-                        const filename = req.url.replace('/downloads/', '');
+                        const filename = decodeURIComponent(req.url.replace('/downloads/', ''));
+                        if (!/^[A-Za-z0-9._-]+\.png$/.test(filename)) {
+                            res.statusCode = 400;
+                            res.setHeader('Content-Type', 'application/json');
+                            res.end(JSON.stringify({ error: 'Invalid filename' }));
+                            return;
+                        }
                         const filePath = path.join(capturesDir, filename);
                         
                         try {

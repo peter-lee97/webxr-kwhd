@@ -1,94 +1,105 @@
-# WebXR KWHD — deployment runbook
+# WebXR KWHD - deployment runbook
 
-## Current production target
+## Production target
 
 | Key | Value |
 |---|---|
-| Provider | Hetzner Cloud |
-| Host/IP | `49.12.186.48` |
-| Domain | `vr.compilechicken.com` |
-| SSH user | `root` |
-| SSH key | `.ssh/hetzner_id` |
+| Server | shared prod server, SSH alias `mc.prod` |
+| Host | `195.201.224.167` (Hetzner, hostname `debian-4gb-nbg1-1`) |
+| Subdomain | `vr.compilechicken.com` |
+| Server directory | `~/webxr/` |
+| Host port | `127.0.0.1:4100` forwards to container port 3000 |
+| TLS | host Caddy via `/etc/caddy/sites-enabled/webxr.caddy` |
 
-SSH:
-
-```bash
-ssh -i .ssh/hetzner_id root@49.12.186.48
-```
+The server is shared with other apps.
+Do not touch their containers, Caddy site files, or ports
+(`3000`, `4000`, `4001`, `4080`, `7350`, `7777`, `8000`, `8787` are taken).
 
 ## Stack
 
-`Internet -> Caddy (TLS/443) -> webxr-app:3000 (Express) -> ./captures (bind mount)`
+`Internet -> host Caddy (TLS 443) -> localhost:4100 -> webxr-kwhd container (Express on 3000) -> ./captures bind mount`
 
-Defined in `docker-compose.prod.yml`:
-- `caddy` service (ports 80/443)
-- `webxr-app` service (builds this repo)
-- persistent `captures` folder on host
+Caddy is a host service on the server.
+This repo does not run its own Caddy container in production.
+The in-repo `Caddyfile` is the template for the server's site file.
 
-## First deployment
+## First-time setup (already done, kept for reference)
 
-From local repo root:
-
-```bash
-./deploy.sh
-```
-
-`deploy.sh` does all of the following:
-1. Rsync project files to `/opt/webxr-kwhd`
-2. Install Docker remotely if missing
-3. Create `.env` from `.env.example` if absent
-4. Create `captures/`
-5. Start/rebuild services with `docker compose up -d --build`
-
-## Normal redeploy
-
-After code changes:
-
-```bash
-./deploy.sh
-```
-
-## Domain and HTTPS
-
-`Caddyfile` currently uses:
-
-```caddyfile
-vr.compilechicken.com {
-    reverse_proxy webxr-app:3000
-}
-```
-
-If domain changes:
-1. Update DNS `A` record to point to the server IP.
-2. Edit `/opt/webxr-kwhd/Caddyfile` with the new host.
-3. Restart Caddy:
-   ```bash
-   cd /opt/webxr-kwhd
-   docker compose restart caddy
-   ```
-
-## Environment variables
-
-Set in `/opt/webxr-kwhd/.env`:
+1. DNS A record `vr.compilechicken.com` pointing at `195.201.224.167`.
+2. On the server: `~/webxr/` with `docker-compose.prod.yml`, `captures/`, and a manually created `.env`.
+3. `.env` contents (server only, never committed, never scp'd):
 
 ```env
 PORT=3000
 DOWNLOADS_USER=admin
-DOWNLOADS_PASS=changeme
+DOWNLOADS_PASS=<strong password>
+CAPTURES_MAX_FILES=500
 ```
 
-Change `DOWNLOADS_PASS` before exposing `/downloads` publicly.
+4. Caddy site file `/etc/caddy/sites-enabled/webxr.caddy` from this repo's `Caddyfile`:
 
-## Operations
+```caddyfile
+vr.compilechicken.com {
+    reverse_proxy localhost:4100
+}
+```
+
+Install and reload Caddy (needs sudo password):
 
 ```bash
-cd /opt/webxr-kwhd
+sudo cp Caddyfile /etc/caddy/sites-enabled/webxr.caddy
+sudo systemctl reload caddy
+```
 
-docker compose ps
-docker compose logs -f
-docker compose logs -f webxr-app
-docker compose logs -f caddy
-docker compose restart
-docker compose down && docker compose up -d --build
+Reload, never restart, so other sites keep serving.
+
+## Deploy
+
+From the repo root:
+
+```bash
+./deploy.sh
+```
+
+What it does:
+
+1. Builds `webxr-kwhd:latest` locally.
+2. Saves the image as a gzipped tarball.
+3. scp's the tarball plus `docker-compose.prod.yml` to `mc.prod:/tmp/`.
+4. On the server: copies the compose file into `~/webxr/`, `docker load`s the image, and runs `docker compose -f docker-compose.prod.yml up -d`.
+5. Removes the transfer artifacts and prunes unused Docker objects.
+
+Secrets never leave the server.
+If `~/webxr/.env` is missing, the deploy aborts with instructions.
+
+## Verify after every deploy
+
+```bash
+curl -s https://vr.compilechicken.com/health
+curl -I https://vr.compilechicken.com
+curl -s "https://vr.compilechicken.com/gallery/files/..%2fpackage.json" -o /dev/null -w "%{http_code}\n"   # expect 400
+```
+
+On the server:
+
+```bash
+docker compose -f ~/webxr/docker-compose.prod.yml ps
+docker compose -f ~/webxr/docker-compose.prod.yml logs --tail 50
+```
+
+## Operations on the server
+
+```bash
+cd ~/webxr
+
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f
+docker compose -f docker-compose.prod.yml restart
+docker compose -f docker-compose.prod.yml down && docker compose -f docker-compose.prod.yml up -d
 ls -lah captures/
 ```
+
+## Rollback
+
+Keep the previous image tarball before deploying.
+To roll back, `docker load` the old tarball and run `docker compose -f docker-compose.prod.yml up -d` again.

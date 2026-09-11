@@ -20,6 +20,7 @@ cp .env.example .env
 DOWNLOADS_USER=admin
 DOWNLOADS_PASS=changeme
 PORT=3000
+CAPTURES_MAX_FILES=500
 ```
 
 ## App routes
@@ -27,6 +28,7 @@ PORT=3000
 - `GET /` — main app
 - `GET /dashboard` — capture management dashboard
 - `GET /gallery` — public gallery view
+- `GET /health` — liveness check, returns `{"ok":true}`
 
 ## Capture routes (production / Express)
 
@@ -41,6 +43,9 @@ Request body:
 Notes:
 - `server.js` uses `dataUrl` and generates a unique filename automatically.
 - Client currently also sends `name`; this is ignored safely by Express.
+- Rate limited to 30 requests per IP per 5 minutes.
+- Filename params in all routes must match `^[A-Za-z0-9._-]+\.png$`; anything else returns 400.
+- When capture count exceeds `CAPTURES_MAX_FILES` (default 500), the oldest PNG files are pruned automatically.
 
 ### GET `/downloads` (basic auth required)
 

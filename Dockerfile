@@ -21,6 +21,7 @@ RUN npm ci --omit=dev
 # Copy compiled bundle and runtime files
 COPY --from=builder /app/dist ./dist
 COPY dashboard.html ./
+COPY gallery.html ./
 COPY server.js ./
 
 # Captures directory – mount a host volume here to persist screenshots
