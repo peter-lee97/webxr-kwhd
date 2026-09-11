@@ -6,8 +6,8 @@ SERVER="mc.prod"
 IMAGE="webxr-kwhd:latest"
 TARBALL="/tmp/webxr-kwhd.tar.gz"
 
-echo "▶ Building image ${IMAGE} ..."
-docker build -t "$IMAGE" .
+echo "▶ Building image ${IMAGE} (linux/amd64) ..."
+docker build --platform linux/amd64 -t "$IMAGE" .
 
 echo "▶ Exporting image to ${TARBALL} ..."
 docker save "$IMAGE" | gzip > "$TARBALL"
@@ -38,7 +38,26 @@ cd "$REMOTE_DIR"
 docker load -i /tmp/webxr-kwhd.tar.gz
 docker compose -f docker-compose.prod.yml up -d
 rm -f /tmp/webxr-kwhd.tar.gz /tmp/docker-compose.prod.yml
-docker system prune -f
+docker image prune -f
+
+echo ""
+echo "▶ Verifying health endpoint ..."
+
+for i in $(seq 1 15); do
+  if curl -sf http://127.0.0.1:4100/health | grep -q '"ok":true'; then
+    echo "✅ Health check passed"
+    HEALTH_OK=1
+    break
+  fi
+  sleep 2
+done
+
+if [ "${HEALTH_OK:-0}" != "1" ]; then
+  echo "❌ Health check FAILED. Recent logs:"
+  docker compose -f docker-compose.prod.yml logs --tail 30
+  echo "Rollback: docker load the previous image tarball, then up -d again."
+  exit 1
+fi
 
 echo ""
 echo "✅ Remote status:"
